@@ -10,7 +10,7 @@ This repository builds localization datasets for exactly that setting. Each inst
 
 Design goals:
 
-- **Large native-code repositories.** One dataset per repository, starting with Linux (via `Fixes:` trailers) and LLVM (via GitHub issue references).
+- **Large native-code repositories.** One dataset per repository: Linux, QEMU and PostgreSQL via commit-message trailers; LLVM, systemd and ClickHouse via GitHub issue references.
 - **Temporal control.** Every instance records the fix timestamp and the exact pre-fix commit, so datasets can be split by date and evaluated against models with known training cutoffs.
 - **Honest labels.** Gold files come from the actual fixing change, restricted to non-test C/C++ sources. Function-level labels are included only when extraction is verified to be reliable (not yet: `gold_functions` is `null` in v0).
 - **Reproducibility.** Extraction is a deterministic pipeline over a pinned commit range; anyone with a clone of the upstream repository can regenerate the data.
@@ -26,6 +26,7 @@ Design goals:
 | `data/llvm/v0/` | `llvm/llvm-project` | GitHub issue title + body | commits since 2025-01-01 | 5,794 | candidates say `Fixes #N` / `Closes #N` / `Resolves <issue url>` |
 | `data/llvm/v1/` | `llvm/llvm-project` | GitHub issue title + body | commits since 2024-01-01 | 8,357 | v0 rules, full range, two shards, `metadata.leakage` |
 | `data/systemd/v0/` | `systemd/systemd` | GitHub issue title + body | commits since 2022-01-01 | 1,418 | candidates reference a systemd issue |
+| `data/clickhouse/v0/` | `ClickHouse/ClickHouse` | GitHub issue title + body | commits since 2022-01-01 | 1,022 | candidates reference a ClickHouse issue |
 
 Each directory holds `instances.jsonl` (or `instances-000.jsonl`, `instances-001.jsonl`, … when one file would exceed 45 MB; read them with a glob), `STATS.md` (the filter funnel with counts) and `COMMAND.txt` (exact command line, extractor commit, upstream HEAD). Per-repository notes and a leakage probe live in `docs/extraction-<repo>.md`; every judgment call is logged in `docs/decisions.md`.
 
@@ -55,7 +56,7 @@ Applied in this order; `STATS.md` reports survivors of each stage.
 
 1. not a merge commit
 2. not a revert (`Revert "..."` subject or `This reverts commit` body)
-3. has a reference (`Fixes: <sha>` trailer for Linux; `Fixes/Closes/Resolves #N` for GitHub-issue repositories)
+3. has a reference (`Fixes: <sha>` trailer for Linux and QEMU; `Reported-by:` or `Bug: #N` trailer for PostgreSQL; `Fixes/Closes/Resolves #N` or the issue URL for GitHub-issue repositories)
 4. at least one gold file: changed path with a C/C++ extension (`.c .h .cc .cpp .cxx .hh .hpp .hxx`) that is not a test path (`test/`, `tests/`, `testing/`, `selftests/`, `unittest(s)/` directories, or a `test` token in the file name)
 5. between 1 and 5 gold files
 6. a non-empty problem statement (for issue-backed repositories: the first referenced number that is a real issue, not a pull request or a deleted issue)
@@ -86,7 +87,8 @@ Upstream repositories are cloned into `repos/<name>` (git-ignored). Blob-less cl
 ```bash
 git clone --filter=blob:none --no-checkout https://github.com/torvalds/linux.git repos/linux
 git clone --filter=blob:none --no-checkout https://github.com/llvm/llvm-project.git repos/llvm
-git -C repos/linux config gc.auto 0 && git -C repos/llvm config gc.auto 0
+# likewise qemu/qemu, postgres/postgres, systemd/systemd, ClickHouse/ClickHouse into repos/<name>
+for r in repos/*/; do git -C "$r" config gc.auto 0; done
 ```
 
 Do not run status-style git commands (or leave an editor/shell) inside a `--no-checkout` partial clone: anything that diffs HEAD against the empty index fetches every blob in HEAD.

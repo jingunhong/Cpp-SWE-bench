@@ -1,0 +1,3 @@
+command: scripts/extract.py --repo clickhouse --since 2022-01-01 --out data/clickhouse/v0/
+extractor git SHA: c0792c1c301313c4957a27e965de4412bc843ee9
+upstream HEAD: d1adb9f9ffeeb41f2a7b4db2259d14e3db5a8edc
