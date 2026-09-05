@@ -1,39 +1,43 @@
-"""Leakage probe: how many sampled problem statements name a gold file or function verbatim.
+"""Leakage report: how many problem statements name a gold file or patched function verbatim.
 
-uv run python scripts/leakage.py data/linux/v0/instances.jsonl --n 20 --seed 0
+uv run python scripts/leakage.py data/linux/v1/instances*.jsonl          # whole set
+uv run python scripts/leakage.py data/linux/v0/instances.jsonl --n 20    # sampled table
 """
 
 import argparse
 import json
 import random
-import re
+import sys
 from pathlib import Path
 
-_HUNK_FUNC_RE = re.compile(r"^@@ .* @@.*?\b([A-Za-z_]\w*)\s*\(", re.MULTILINE)
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from cpp_swe_bench import leakage  # noqa: E402
 
 
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("jsonl", type=Path)
-    ap.add_argument("--n", type=int, default=20)
+    ap.add_argument("jsonl", type=Path, nargs="+")
+    ap.add_argument("--n", type=int, default=0, help="sample size; 0 = all instances")
     ap.add_argument("--seed", type=int, default=0)
     args = ap.parse_args()
-    rows = [json.loads(line) for line in args.jsonl.open(encoding="utf-8")]
-    sample = random.Random(args.seed).sample(rows, min(args.n, len(rows)))
-    path_hits = base_hits = func_hits = 0
-    print("| instance_id | full path | basename | function |")
-    print("|---|:-:|:-:|:-:|")
-    for r in sample:
-        text = r["problem_statement"]
-        p = any(g in text for g in r["gold_files"])
-        b = any(g.rsplit("/", 1)[-1] in text for g in r["gold_files"])
-        funcs = set(_HUNK_FUNC_RE.findall(r["patch"]))
-        f = any(re.search(rf"\b{re.escape(fn)}\b", text) for fn in funcs)
-        path_hits, base_hits, func_hits = path_hits + p, base_hits + b, func_hits + f
-        cells = " | ".join("x" if hit else "" for hit in (p, b, f))
-        print(f"| {r['instance_id']} | {cells} |")
-    n = len(sample)
-    print(f"\n{n} sampled: full path {path_hits}, basename {base_hits}, function name {func_hits}")
+    rows = [json.loads(line) for p in args.jsonl for line in p.open(encoding="utf-8")]
+    if args.n:
+        rows = random.Random(args.seed).sample(rows, min(args.n, len(rows)))
+    hits = dict.fromkeys(leakage.FLAGS, 0)
+    for r in rows:
+        f = r["metadata"].get("leakage") or leakage.flags(
+            r["problem_statement"], r["gold_files"], r["patch"]
+        )
+        for k in hits:
+            hits[k] += bool(f[k])
+        if args.n:
+            cells = " | ".join("x" if f[k] else "" for k in hits)
+            print(f"| {r['instance_id']} | {cells} |")
+    n = len(rows)
+    print(f"\n{n} instances:")
+    for k, v in hits.items():
+        print(f"  {k}: {v} ({100 * v / n:.1f}%)")
 
 
 if __name__ == "__main__":

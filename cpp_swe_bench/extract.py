@@ -1,9 +1,10 @@
 """The extraction pipeline: git history -> filtered Instance records + funnel counts."""
 
 from collections.abc import Callable, Iterator
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
-from . import EXTRACTOR_VERSION, filters, gitutil
+from . import EXTRACTOR_VERSION, filters, gitutil, leakage
 from .schema import Instance
 
 FILTER_ORDER = ("not merge", "not revert", "has reference", "has gold files", "1-5 gold files")
@@ -73,14 +74,20 @@ def mine(
         )
 
 
-def add_patches(repo: Path, instances: list[Instance]) -> None:
-    """Fill ``patch`` for every instance, bulk-fetching blobs first on partial clones."""
-    oids = []
-    for inst in instances:
-        oids += gitutil.blob_oids(repo, inst.base_commit, inst.fix_commit, inst.gold_files)
-    gitutil.prefetch_blobs(repo, oids)
-    for inst in instances:
-        inst.patch = gitutil.diff(repo, inst.base_commit, inst.fix_commit, inst.gold_files)
+def add_patches(repo: Path, instances: list[Instance], workers: int = 8) -> None:
+    """Fill ``patch`` and ``metadata.leakage`` for every instance, bulk-fetching blobs first
+    on partial clones. Read-only git calls run in parallel threads."""
+    with ThreadPoolExecutor(workers) as pool:
+        oids = pool.map(
+            lambda i: gitutil.blob_oids(repo, i.base_commit, i.fix_commit, i.gold_files), instances
+        )
+        gitutil.prefetch_blobs(repo, [o for batch in oids for o in batch])
+        patches = pool.map(
+            lambda i: gitutil.diff(repo, i.base_commit, i.fix_commit, i.gold_files), instances
+        )
+        for inst, patch in zip(instances, patches, strict=True):
+            inst.patch = patch
+            inst.metadata["leakage"] = leakage.flags(inst.problem_statement, inst.gold_files, patch)
 
 
 def commit_message_problem(c: gitutil.Commit) -> tuple[str, str, dict] | None:

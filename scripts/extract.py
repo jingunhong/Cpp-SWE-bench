@@ -13,7 +13,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from cpp_swe_bench import extract, filters, github, gitutil, writers  # noqa: E402
+from cpp_swe_bench import extract, filters, github, gitutil, leakage, writers  # noqa: E402
 
 REPOS = {
     "linux": {"upstream": "torvalds/linux", "source": "commit_message"},
@@ -59,7 +59,12 @@ def main() -> None:
         extract.add_patches(clone, instances)
 
     args.out.mkdir(parents=True, exist_ok=True)
-    n = writers.write_jsonl(args.out / "instances.jsonl", instances)
+    paths = writers.write_jsonl(args.out, instances)
+    n = len(instances)
+    leaks = {
+        flag: sum(1 for i in instances if i.metadata.get("leakage", {}).get(flag))
+        for flag in leakage.FLAGS
+    }
     upstream_head = gitutil.head(clone)
     writers.write_stats(
         args.out / "STATS.md",
@@ -67,6 +72,10 @@ def main() -> None:
         list(funnel.items()),
         {
             "instances written": n,
+            "files": ", ".join(p.name for p in paths),
+            "problem statement names a gold path / basename / patched function": ", ".join(
+                f"{k}: {v} ({100 * v / n:.1f}%)" if n else f"{k}: 0" for k, v in leaks.items()
+            ),
             "upstream": cfg["upstream"],
             "upstream HEAD": upstream_head,
             "since": args.since,
@@ -82,7 +91,7 @@ def main() -> None:
         f"extractor git SHA: {extractor_sha}\n"
         f"upstream HEAD: {upstream_head}\n"
     )
-    print(f"wrote {n} instances to {args.out}", file=sys.stderr)
+    print(f"wrote {n} instances to {', '.join(map(str, paths))}", file=sys.stderr)
 
 
 if __name__ == "__main__":

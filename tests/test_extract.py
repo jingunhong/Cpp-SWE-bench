@@ -41,8 +41,8 @@ def test_end_to_end(synthetic_repo, tmp_path: Path):
     assert "return 0" in inst.patch and "+int foo(void);" in inst.patch
     assert inst.validate() == []
 
-    out = tmp_path / "instances.jsonl"
-    assert writers.write_jsonl(out, instances) == 1
+    assert inst.metadata["leakage"] == {"path": False, "basename": False, "function": False}
+    [out] = writers.write_jsonl(tmp_path, instances)
     assert Instance.from_json(out.read_text().splitlines()[0]) == inst
     stats = tmp_path / "STATS.md"
     writers.write_stats(stats, "t", list(funnel.items()), {"n": 1})
