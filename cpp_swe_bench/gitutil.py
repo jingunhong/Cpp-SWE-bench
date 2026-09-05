@@ -86,7 +86,7 @@ def prefetch_blobs(repo: Path, oids: list[str], batch: int = 5000) -> None:
 
     No-op on a full clone.
     """
-    if not run(repo, "config", "--default", "", "extensions.partialClone").strip():
+    if run(repo, "config", "--default", "", "remote.origin.promisor").strip() != "true":
         return
     oids = sorted(set(oids))
     for i in range(0, len(oids), batch):
