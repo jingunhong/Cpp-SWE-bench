@@ -25,6 +25,7 @@ Design goals:
 | `data/postgres/v0/` | `postgres/postgres` | commit message (trailers stripped) | commits since 2022-01-01 | 1,333 | candidates carry a `Reported-by:` or `Bug: #N` trailer |
 | `data/llvm/v0/` | `llvm/llvm-project` | GitHub issue title + body | commits since 2025-01-01 | 5,794 | candidates say `Fixes #N` / `Closes #N` / `Resolves <issue url>` |
 | `data/llvm/v1/` | `llvm/llvm-project` | GitHub issue title + body | commits since 2024-01-01 | 8,357 | v0 rules, full range, two shards, `metadata.leakage` |
+| `data/systemd/v0/` | `systemd/systemd` | GitHub issue title + body | commits since 2022-01-01 | 1,418 | candidates reference a systemd issue |
 
 Each directory holds `instances.jsonl` (or `instances-000.jsonl`, `instances-001.jsonl`, … when one file would exceed 45 MB; read them with a glob), `STATS.md` (the filter funnel with counts) and `COMMAND.txt` (exact command line, extractor commit, upstream HEAD). Per-repository notes and a leakage probe live in `docs/extraction-<repo>.md`; every judgment call is logged in `docs/decisions.md`.
 
