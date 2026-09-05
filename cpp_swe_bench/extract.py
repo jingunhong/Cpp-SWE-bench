@@ -16,13 +16,14 @@ def mine(
     *,
     since: str | None,
     references: Callable[[str], list],
-    problem: Callable[[gitutil.Commit], tuple[str, str] | None],
+    problem: Callable[[gitutil.Commit], tuple[str, str, dict] | None],
     funnel: dict[str, int],
 ) -> Iterator[Instance]:
     """Yield instances without ``patch`` (filled by :func:`add_patches`).
 
     ``references(message)`` returns the issue/commit references that make a commit a
-    candidate; ``problem(commit)`` returns ``(statement, source)`` or None to drop.
+    candidate; ``problem(commit)`` returns ``(statement, source, extra_metadata)`` or
+    None to drop.
     ``funnel`` is updated in place with survivor counts per stage.
     """
     for stage in ("candidates", *FILTER_ORDER, "has problem statement"):
@@ -50,7 +51,7 @@ def mine(
         if not found:
             continue
         funnel["has problem statement"] += 1
-        statement, source = found
+        statement, source, extra = found
         yield Instance(
             instance_id=f"{repo_name}__{c.sha[:12]}",
             repo=upstream,
@@ -67,6 +68,7 @@ def mine(
                 "references": refs,
                 "filters": list(FILTER_ORDER),
                 "changed_files_total": len(c.files),
+                **extra,
             },
         )
 
@@ -81,7 +83,7 @@ def add_patches(repo: Path, instances: list[Instance]) -> None:
         inst.patch = gitutil.diff(repo, inst.base_commit, inst.fix_commit, inst.gold_files)
 
 
-def commit_message_problem(c: gitutil.Commit) -> tuple[str, str] | None:
+def commit_message_problem(c: gitutil.Commit) -> tuple[str, str, dict] | None:
     """Problem statement = commit message with trailers stripped."""
     text = filters.strip_trailers(c.message)
-    return (text, "commit_message") if text else None
+    return (text, "commit_message", {}) if text else None

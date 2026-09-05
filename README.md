@@ -10,10 +10,19 @@ This repository builds localization datasets for exactly that setting. Each inst
 
 Design goals:
 
-- **Large native-code repositories.** One dataset per repository, starting with Linux (via `Fixes:` trailers) and extending to large C++ projects with traceable issue↔commit links.
+- **Large native-code repositories.** One dataset per repository, starting with Linux (via `Fixes:` trailers) and LLVM (via GitHub issue references).
 - **Temporal control.** Every instance records the fix timestamp and the exact pre-fix commit, so datasets can be split by date and evaluated against models with known training cutoffs.
-- **Honest labels.** Gold files come from the actual fixing change, restricted to non-test C/C++ sources. Function-level labels are included only when extraction is verified to be reliable.
+- **Honest labels.** Gold files come from the actual fixing change, restricted to non-test C/C++ sources. Function-level labels are included only when extraction is verified to be reliable (not yet: `gold_functions` is `null` in v0).
 - **Reproducibility.** Extraction is a deterministic pipeline over a pinned commit range; anyone with a clone of the upstream repository can regenerate the data.
+
+## Datasets
+
+| Directory | Upstream | Problem statement | Range | Notes |
+|---|---|---|---|---|
+| `data/linux/v0/` | `torvalds/linux` | commit message (trailers stripped) | commits since 2026-01-01 | candidates carry a `Fixes: <sha>` trailer |
+| `data/llvm/v0/` | `llvm/llvm-project` | GitHub issue title + body | commits since 2025-01-01 | candidates say `Fixes #N` / `Closes #N` / `Resolves <issue url>` |
+
+Each directory holds `instances.jsonl`, `STATS.md` (the filter funnel with counts) and `COMMAND.txt` (exact command line, extractor commit, upstream HEAD). Per-repository notes and a leakage probe live in `docs/extraction-<repo>.md`; every judgment call is logged in `docs/decisions.md`.
 
 ## Instance schema
 
@@ -33,16 +42,28 @@ One JSON object per line (`data/<repo>/<version>/instances.jsonl`).
 | `patch` | str | Unified diff of the fix restricted to `gold_files` |
 | `metadata` | object | Extractor version, referenced issue/bug IDs, filter decisions |
 
-Fields beyond `metadata` are frozen per dataset version; additions go into `metadata` until the next version.
+Fields beyond `metadata` are frozen per dataset version; additions go into `metadata` until the next version. In v0 `metadata` contains `extractor_version`, `references` (the `Fixes:` SHA prefixes or issue numbers as written in the commit message), `filters` (the funnel stages applied), `changed_files_total` (all files the fix touched, including non-gold ones) and, for issue-backed instances, `issue_number` and `issue_url`.
+
+## Filters
+
+Applied in this order; `STATS.md` reports survivors of each stage.
+
+1. not a merge commit
+2. not a revert (`Revert "..."` subject or `This reverts commit` body)
+3. has a reference (`Fixes: <sha>` trailer for Linux; `Fixes/Closes/Resolves #N` for GitHub-issue repositories)
+4. at least one gold file: changed path with a C/C++ extension (`.c .h .cc .cpp .cxx .hh .hpp .hxx`) that is not a test path (`test/`, `tests/`, `testing/`, `selftests/`, `unittest(s)/` directories, or a `test` token in the file name)
+5. between 1 and 5 gold files
+6. a non-empty problem statement (for issue-backed repositories: the first referenced number that is a real issue, not a pull request or a deleted issue)
 
 ## Repository layout
 
 ```
-cpp_swe_bench/      extraction library (git mining, filters, schema, writers)
-scripts/            entry points: extract, filter, stats, validate
-data/<repo>/<ver>/  instances.jsonl + STATS.md + the exact command that produced them
-tests/              unit tests on small fixtures; no network, no full clones
-docs/               design notes and per-repository extraction decisions
+cpp_swe_bench/      extraction library: gitutil, filters, schema, writers, extract, github
+scripts/            extract.py, validate.py, leakage.py
+data/<repo>/<ver>/  instances.jsonl + STATS.md + COMMAND.txt
+tests/              unit tests on synthetic git repos created in tmp_path; no network
+docs/               decisions.md and per-repository extraction notes
+repos/              local upstream clones and the GitHub API cache (git-ignored)
 ```
 
 ## Setup
@@ -55,16 +76,26 @@ uv run pre-commit install
 uv run pytest
 ```
 
-Upstream repositories are cloned outside this repo (default `~/repos/<name>`) and are never committed. Blob-less clones (`git clone --filter=blob:none`) are sufficient for file-level extraction.
+Upstream repositories are cloned into `repos/<name>` (git-ignored). Blob-less clones are sufficient; blobs for the surviving instances are bulk-fetched when patches are produced.
+
+```bash
+git clone --filter=blob:none --no-checkout https://github.com/torvalds/linux.git repos/linux
+git clone --filter=blob:none --no-checkout https://github.com/llvm/llvm-project.git repos/llvm
+git -C repos/linux config gc.auto 0 && git -C repos/llvm config gc.auto 0
+```
+
+Do not run status-style git commands (or leave an editor/shell) inside a `--no-checkout` partial clone: anything that diffs HEAD against the empty index fetches every blob in HEAD.
 
 ## Regenerating a dataset
 
 ```bash
-uv run python scripts/extract.py --repo linux --since 2020-01-01 --out data/linux/v0/
+uv run python scripts/extract.py --repo linux --since 2026-01-01 --out data/linux/v0/
+GITHUB_TOKEN=... uv run python scripts/extract.py --repo llvm --since 2025-01-01 --out data/llvm/v0/
 uv run python scripts/validate.py data/linux/v0/instances.jsonl
+uv run python scripts/leakage.py data/linux/v0/instances.jsonl --n 20
 ```
 
-Each `data/<repo>/<ver>/` directory contains the exact command line and upstream HEAD used, so the run is reproducible.
+`--since` is passed to `git log` (committer date). Issue-backed repositories read `GITHUB_TOKEN` if set (5,000 requests/hour) and otherwise run unauthenticated at 60 requests/hour; responses are cached under `repos/cache/` so re-runs are offline. `--no-patch` skips patch generation for a quick funnel count.
 
 ## Non-goals
 

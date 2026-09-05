@@ -34,8 +34,10 @@ def test_fixes_shas():
 
 def test_issue_refs():
     msg = "Fix crash (fixes #12, closes: #7)\n\nResolves https://github.com/o/r/issues/99"
-    assert filters.issue_refs(msg) == [7, 12, 99]
-    assert filters.issue_refs("see #5 for context") == []
+    assert filters.issue_refs(msg, "o/r") == [12, 7, 99]
+    assert filters.issue_refs("Fixes o/r#5 and fixes #5", "o/r") == [5]
+    assert filters.issue_refs("Fixes https://github.com/x/y/issues/3, fixes x/y#4", "o/r") == []
+    assert filters.issue_refs("see #5 for context", "o/r") == []
 
 
 def test_is_cpp_source():

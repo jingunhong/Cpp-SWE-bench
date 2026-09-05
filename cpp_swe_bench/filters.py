@@ -29,11 +29,7 @@ _TRAILER_KEYS = {
 }
 _TRAILER_RE = re.compile(r"^([A-Za-z][A-Za-z0-9-]*):[ \t]")
 _FIXES_SHA_RE = re.compile(r"^Fixes:\s*([0-9a-f]{7,40})\b", re.IGNORECASE | re.MULTILINE)
-_ISSUE_REF_RE = re.compile(
-    r"\b(?:fix|fixes|fixed|close|closes|closed|resolve|resolves|resolved)\s*:?\s*"
-    r"(?:https://github\.com/[\w.-]+/[\w.-]+/issues/|#)(\d+)",
-    re.IGNORECASE,
-)
+_ISSUE_KEYWORDS = r"\b(?:fix|fixes|fixed|close|closes|closed|resolve|resolves|resolved)\s*:?\s*"
 MIN_GOLD_FILES, MAX_GOLD_FILES = 1, 5
 
 
@@ -89,6 +85,10 @@ def fixes_shas(message: str) -> list[str]:
     return _FIXES_SHA_RE.findall(message)
 
 
-def issue_refs(message: str) -> list[int]:
-    """Issue numbers referenced as ``Fixes #N``, ``Closes: #N``, ``Resolves <issue url>`` ..."""
-    return sorted({int(n) for n in _ISSUE_REF_RE.findall(message)})
+def issue_refs(message: str, upstream: str) -> list[int]:
+    """Issue numbers of ``upstream`` (``owner/repo``) referenced as ``Fixes #N``,
+    ``Closes: #N``, ``Resolves <issue url>``, ``Fix owner/repo#N``... in order of first
+    mention, without duplicates. References to other repositories are ignored."""
+    up = re.escape(upstream)
+    pattern = _ISSUE_KEYWORDS + rf"(?:https://github\.com/{up}/issues/|{up}#|#)(\d+)\b"
+    return list(dict.fromkeys(int(n) for n in re.findall(pattern, message, re.IGNORECASE)))
