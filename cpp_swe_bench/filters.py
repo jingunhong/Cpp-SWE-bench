@@ -26,9 +26,15 @@ _TRAILER_KEYS = {
     "bug",
     "references",
     "see-also",
+    "discussion",
+    "backpatch-through",
+    "author",
+    "security",
 }
 _TRAILER_RE = re.compile(r"^([A-Za-z][A-Za-z0-9-]*):[ \t]")
 _FIXES_SHA_RE = re.compile(r"^Fixes:\s*([0-9a-f]{7,40})\b", re.IGNORECASE | re.MULTILINE)
+_REPORT_RE = re.compile(r"^(?:Bug: #(\d+)|Discussion: (\S+))", re.MULTILINE)
+_REPORTED_RE = re.compile(r"^(?:Reported-by|Bug):", re.MULTILINE)
 _ISSUE_KEYWORDS = r"\b(?:fix|fixes|fixed|close|closes|closed|resolve|resolves|resolved)\s*:?\s*"
 MIN_GOLD_FILES, MAX_GOLD_FILES = 1, 5
 
@@ -83,6 +89,14 @@ def strip_trailers(message: str) -> str:
 def fixes_shas(message: str) -> list[str]:
     """SHA prefixes referenced by ``Fixes: <sha> (...)`` trailers, in order."""
     return _FIXES_SHA_RE.findall(message)
+
+
+def report_refs(message: str) -> list[str]:
+    """PostgreSQL-style bug references: for commits carrying a ``Reported-by:`` or
+    ``Bug: #N`` trailer, the bug numbers and ``Discussion:`` archive URLs; else empty."""
+    if not _REPORTED_RE.search(message):
+        return []
+    return [f"#{bug}" if bug else url for bug, url in _REPORT_RE.findall(message)]
 
 
 def issue_refs(message: str, upstream: str) -> list[int]:

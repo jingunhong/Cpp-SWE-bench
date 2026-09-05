@@ -100,3 +100,28 @@ Conservative choices made without feedback, newest last. Dates are absolute.
   version should pin the range by commit (`<sha>..HEAD`) instead of by date.
 - **Patch phase parallelised** with 8 threads of read-only git calls; results are
   deterministic (ordered map), so output does not depend on scheduling.
+
+## 2026-09-05 — more repositories
+
+Survey (git-side funnel only, instances = 1–5 gold files; issue repos since 2024-01-01,
+`Fixes:`-trailer repos since 2022-01-01):
+
+| Repository | Link type | Instances | Decision |
+|---|---|---:|---|
+| qemu/qemu | `Fixes: <sha>` trailer | 2,367 | added (`qemu`), same rules as Linux |
+| postgres/postgres | `Reported-by:` / `Bug: #N` + `Discussion:` URL | 1,333 | added (`postgres`), commit-message source |
+| systemd/systemd | GitHub issues | 754 (since 2024) | added (`systemd`), run since 2022 |
+| duckdb/duckdb | GitHub issues | 376 | skipped: links live in PR merge commits |
+| nodejs/node | `Fixes: <issue url>` | 304 | skipped: most fixes are JavaScript-only |
+| godotengine/godot | GitHub issues | 222 | skipped: links live in PR merge commits |
+| sqlite/sqlite | Fossil mirror, forum posts | n/a | skipped: no API, 149 C files in `src/` |
+| ClickHouse/ClickHouse | GitHub issues | pending clone | decided when the clone lands |
+
+- **PostgreSQL candidates** are commits with a `Reported-by:` or `Bug: #N` trailer, which
+  the project uses only for reported problems; `Discussion:` alone marks every commit and
+  is not used as a signal. `metadata.references` holds the bug numbers and the
+  `Discussion:` archive URLs. `Discussion`, `Backpatch-through`, `Author` and `Security`
+  were added to the trailer keys so they are stripped from problem statements.
+- Skipped repositories cost one table line to add later; the merge-commit-only link
+  pattern (DuckDB, Godot) would need a "walk PR merges and take the PR's commits" rule
+  that does not exist yet.

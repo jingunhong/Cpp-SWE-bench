@@ -32,6 +32,17 @@ def test_fixes_shas():
     assert filters.fixes_shas("no trailer\n\nfixes: nothing here") == []
 
 
+def test_report_refs():
+    msg = (
+        "Fix planner crash\n\nThe planner dereferenced NULL.\n\n"
+        "Reported-by: A <a@x>\nBug: #18123\nDiscussion: https://postgr.es/m/abc@x\n"
+        "Backpatch-through: 13\n"
+    )
+    assert filters.report_refs(msg) == ["#18123", "https://postgr.es/m/abc@x"]
+    assert filters.report_refs("Add feature\n\nDiscussion: https://postgr.es/m/x\n") == []
+    assert filters.strip_trailers(msg) == "Fix planner crash\n\nThe planner dereferenced NULL."
+
+
 def test_issue_refs():
     msg = "Fix crash (fixes #12, closes: #7)\n\nResolves https://github.com/o/r/issues/99"
     assert filters.issue_refs(msg, "o/r") == [12, 7, 99]

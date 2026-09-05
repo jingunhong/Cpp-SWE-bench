@@ -15,9 +15,18 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from cpp_swe_bench import extract, filters, github, gitutil, leakage, writers  # noqa: E402
 
+# source "commit_message": candidates carry a Fixes: <sha> trailer (or "references" below);
+# source "github_issue": candidates reference an issue of the upstream repository.
 REPOS = {
     "linux": {"upstream": "torvalds/linux", "source": "commit_message"},
+    "qemu": {"upstream": "qemu/qemu", "source": "commit_message"},
+    "postgres": {
+        "upstream": "postgres/postgres",
+        "source": "commit_message",
+        "references": filters.report_refs,
+    },
     "llvm": {"upstream": "llvm/llvm-project", "source": "github_issue"},
+    "systemd": {"upstream": "systemd/systemd", "source": "github_issue"},
 }
 
 
@@ -41,7 +50,8 @@ def main() -> None:
         issues = github.Issues(cfg["upstream"], args.repos_dir / "cache", token)
         problem = github.IssueProblem(issues)
     else:
-        references, problem = filters.fixes_shas, extract.commit_message_problem
+        references = cfg.get("references", filters.fixes_shas)
+        problem = extract.commit_message_problem
     funnel: dict[str, int] = {}
     instances = list(
         extract.mine(
