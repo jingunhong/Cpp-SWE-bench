@@ -21,6 +21,8 @@ Design goals:
 |---|---|---|---|---:|---|
 | `data/linux/v0/` | `torvalds/linux` | commit message (trailers stripped) | commits since 2026-01-01 | 14,918 | candidates carry a `Fixes: <sha>` trailer |
 | `data/linux/v1/` | `torvalds/linux` | commit message (trailers stripped) | commits since 2022-01-01 | 63,115 | v0 rules, full range, sharded, `metadata.leakage` |
+| `data/qemu/v0/` | `qemu/qemu` | commit message (trailers stripped) | commits since 2022-01-01 | 2,367 | candidates carry a `Fixes: <sha>` trailer |
+| `data/postgres/v0/` | `postgres/postgres` | commit message (trailers stripped) | commits since 2022-01-01 | 1,333 | candidates carry a `Reported-by:` or `Bug: #N` trailer |
 | `data/llvm/v0/` | `llvm/llvm-project` | GitHub issue title + body | commits since 2025-01-01 | 5,794 | candidates say `Fixes #N` / `Closes #N` / `Resolves <issue url>` |
 | `data/llvm/v1/` | `llvm/llvm-project` | GitHub issue title + body | commits since 2024-01-01 | 8,357 | v0 rules, full range, two shards, `metadata.leakage` |
 

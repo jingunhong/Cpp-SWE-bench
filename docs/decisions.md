@@ -115,7 +115,7 @@ Survey (git-side funnel only, instances = 1–5 gold files; issue repos since 20
 | nodejs/node | `Fixes: <issue url>` | 304 | skipped: most fixes are JavaScript-only |
 | godotengine/godot | GitHub issues | 222 | skipped: links live in PR merge commits |
 | sqlite/sqlite | Fossil mirror, forum posts | n/a | skipped: no API, 149 C files in `src/` |
-| ClickHouse/ClickHouse | GitHub issues | pending clone | decided when the clone lands |
+| ClickHouse/ClickHouse | GitHub issues | 954 | added (`clickhouse`), run since 2022; blob-less clone is 6.7 GB |
 
 - **PostgreSQL candidates** are commits with a `Reported-by:` or `Bug: #N` trailer, which
   the project uses only for reported problems; `Discussion:` alone marks every commit and

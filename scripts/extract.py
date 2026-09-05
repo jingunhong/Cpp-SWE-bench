@@ -27,6 +27,7 @@ REPOS = {
     },
     "llvm": {"upstream": "llvm/llvm-project", "source": "github_issue"},
     "systemd": {"upstream": "systemd/systemd", "source": "github_issue"},
+    "clickhouse": {"upstream": "ClickHouse/ClickHouse", "source": "github_issue"},
 }
 
 

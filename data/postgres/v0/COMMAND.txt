@@ -1,0 +1,3 @@
+command: scripts/extract.py --repo postgres --since 2022-01-01 --out data/postgres/v0/
+extractor git SHA: 4c23dfef71d5169d1898427ec8f2a8b36d6d42e8
+upstream HEAD: 798bdcae89debabc59fa8afc6d690fec584db32f
