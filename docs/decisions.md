@@ -72,3 +72,7 @@ Conservative choices made without feedback, newest last. Dates are absolute.
   as `null`), so re-runs are offline.
 - **Problem statement = issue title + body verbatim** (Markdown, including any code blocks and
   stack traces). No scrubbing in v0; see the leakage note.
+- **Transient API failures are retried** (up to 8 attempts, exponential backoff) for
+  connection drops, timeouts and 5xx responses; 403/429 sleep until the quota resets; any
+  other HTTP error aborts the run. The first LLVM run died on a `RemoteDisconnected` after
+  562 issues; the cache made the restart free.

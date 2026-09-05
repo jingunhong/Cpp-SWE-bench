@@ -28,8 +28,25 @@ pass around an hour. See `docs/decisions.md`.
 
 ## Results
 
-(filled in from `data/llvm/v0/STATS.md` after the run)
+Funnel (`data/llvm/v0/STATS.md`): 73,215 candidates → 70,835 non-revert (LLVM has no merge
+commits) → 6,920 with an `llvm/llvm-project` issue reference → 6,253 with gold files →
+5,831 with 1–5 gold files → **5,794 instances** with a problem statement (38 commits
+referenced only pull requests; no referenced issue was missing). `scripts/validate.py`:
+5,794 valid, 0 invalid, 0 duplicate ids. `instances.jsonl` is 44.0 MB; 5,693 API responses
+are cached. Gold files by top-level project: llvm 3,253, clang 2,956, flang 592, mlir 560,
+libc 374, clang-tools-extra 356, libcxx 274, lldb 160. Median problem statement length is
+1,452 characters; the shortest is 21 (a title-only issue).
 
 ## Leakage note
 
-(filled in from `scripts/leakage.py`)
+`uv run python scripts/leakage.py data/llvm/v0/instances.jsonl --n 20 --seed 0`:
+
+| Named verbatim in the problem statement | Instances (of 20) |
+|---|---:|
+| full gold file path | 1 |
+| gold file basename | 6 |
+| function name from the patch | 4 |
+
+Issue reports leak less than kernel commit messages at the function level but more at the
+file level: crash reports and reproducers often quote a basename from an assertion message
+or a stack trace (`SemaExpr.cpp:1234`). Nothing is scrubbed in v0.

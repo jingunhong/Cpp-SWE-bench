@@ -17,10 +17,10 @@ Design goals:
 
 ## Datasets
 
-| Directory | Upstream | Problem statement | Range | Notes |
-|---|---|---|---|---|
-| `data/linux/v0/` | `torvalds/linux` | commit message (trailers stripped) | commits since 2026-01-01 | candidates carry a `Fixes: <sha>` trailer |
-| `data/llvm/v0/` | `llvm/llvm-project` | GitHub issue title + body | commits since 2025-01-01 | candidates say `Fixes #N` / `Closes #N` / `Resolves <issue url>` |
+| Directory | Upstream | Problem statement | Range | Instances | Notes |
+|---|---|---|---|---:|---|
+| `data/linux/v0/` | `torvalds/linux` | commit message (trailers stripped) | commits since 2026-01-01 | 14,918 | candidates carry a `Fixes: <sha>` trailer |
+| `data/llvm/v0/` | `llvm/llvm-project` | GitHub issue title + body | commits since 2025-01-01 | 5,794 | candidates say `Fixes #N` / `Closes #N` / `Resolves <issue url>` |
 
 Each directory holds `instances.jsonl`, `STATS.md` (the filter funnel with counts) and `COMMAND.txt` (exact command line, extractor commit, upstream HEAD). Per-repository notes and a leakage probe live in `docs/extraction-<repo>.md`; every judgment call is logged in `docs/decisions.md`.
 
