@@ -74,4 +74,3 @@ Each `data/<repo>/<ver>/` directory contains the exact command line and upstream
 ## License
 
 Code in this repository is MIT-licensed. Extracted data inherits the license of the respective upstream project; commit messages and issue texts remain the property of their authors.
-
