@@ -1,5 +1,6 @@
 """GitHub issue fetcher: stdlib HTTP, on-disk cache, polite rate limiting."""
 
+import http.client
 import json
 import time
 import urllib.error
@@ -39,7 +40,7 @@ class Issues:
             headers["Authorization"] = f"Bearer {self.token}"
         url = f"{API}/repos/{self.upstream}/issues/{number}"
         req = urllib.request.Request(url, headers=headers)
-        while True:
+        for attempt in range(8):
             try:
                 with urllib.request.urlopen(req, timeout=60) as resp:
                     self._pace(resp.headers)
@@ -49,8 +50,13 @@ class Issues:
                     return None
                 if e.code in (403, 429):
                     self._pace(e.headers, exhausted=True)
-                    continue
-                raise
+                elif e.code >= 500:
+                    time.sleep(2**attempt)
+                else:
+                    raise
+            except urllib.error.URLError, http.client.HTTPException, TimeoutError:
+                time.sleep(2**attempt)  # transient network error, retry with backoff
+        raise RuntimeError(f"giving up on issue {number} after 8 attempts")
 
     def _pace(self, headers, exhausted: bool = False) -> None:
         remaining = int(headers.get("X-RateLimit-Remaining", "1"))
