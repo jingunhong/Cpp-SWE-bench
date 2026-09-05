@@ -1,4 +1,4 @@
-# Linux extraction (v0)
+# Linux extraction (v0, v1)
 
 Upstream: `torvalds/linux`, blob-less clone at `repos/linux`. Candidates are non-merge,
 non-revert commits whose message carries a `Fixes: <sha> ("...")` trailer. The problem
@@ -8,22 +8,32 @@ statement is the commit subject and body with trailers stripped (`problem_source
 
 ## Range
 
-`--since 2026-01-01` (committer date), upstream HEAD and exact command in
-`data/linux/v0/COMMAND.txt`. The full range since 2022 was measured first with `--no-patch`
-and is far over the 50 MB file limit, so v0 keeps the most recent eight months. See
-`docs/decisions.md`.
+- **v0**: `--since 2026-01-01`, a single file under the 50 MB limit.
+- **v1**: `--since 2022-01-01`, five shards (`instances-000.jsonl` … `instances-004.jsonl`,
+  four of 45 MB and one of 0.3 MB), plus `metadata.leakage` flags. Same upstream HEAD.
 
-Reference funnel for `--since 2022-01-01` (dry run, not shipped):
+`--since` is a committer-date bound; 325 v1 instances carry an author date (`created_at`)
+before 2022, the earliest 2019-05-02. Split on `created_at`.
+
+v1 funnel (`data/linux/v1/STATS.md`):
 
 | Stage | Survived | % of candidates |
 |---|---:|---:|
-| candidates | 412,587 | 100.0% |
-| not merge | 379,557 | 92.0% |
-| not revert | 377,189 | 91.4% |
-| has `Fixes:` reference | 73,088 | 17.7% |
+| candidates | 412,585 | 100.0% |
+| not merge | 379,555 | 92.0% |
+| not revert | 377,187 | 91.4% |
+| has `Fixes:` reference | 73,087 | 17.7% |
 | has gold files | 63,671 | 15.4% |
 | 1–5 gold files | 63,115 | 15.3% |
 | has problem statement | 63,115 | 15.3% |
+
+`scripts/validate.py`: 63,115 valid, 0 invalid, 0 duplicate ids. A dry run earlier the
+same day over the same HEAD counted 412,587 candidates: git's `--since` pruning is a
+heuristic at the date boundary and can differ by a few commits between runs; the
+instance count was identical.
+
+Full-set leakage (v1): 6.4% of problem statements name a gold path verbatim, 8.6% a gold
+basename, 39.4% a function from the patch's hunk headers.
 
 Shipped v0 funnel (`--since 2026-01-01`, `data/linux/v0/STATS.md`): 66,410 candidates →
 60,927 non-merge → 60,625 non-revert → 16,577 with a `Fixes:` reference → 15,042 with gold

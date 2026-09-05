@@ -1,4 +1,4 @@
-# LLVM extraction (v0)
+# LLVM extraction (v0, v1)
 
 Upstream: `llvm/llvm-project`, blob-less clone at `repos/llvm`. Candidates are non-merge,
 non-revert commits whose message references an issue of `llvm/llvm-project` with
@@ -10,10 +10,11 @@ date, `gold_files` the changed non-test C/C++ sources, `gold_functions` `null`.
 
 ## Range
 
-`--since 2025-01-01` (committer date); upstream HEAD and the exact command are in
-`data/llvm/v0/COMMAND.txt`. A dry count for `--since 2024-01-01` gave 8,632 git-side
-survivors versus 5,924 for 2025-01-01; the shorter range was chosen to keep the first API
-pass around an hour. See `docs/decisions.md`.
+- **v0**: `--since 2025-01-01`, chosen to keep the first API pass around an hour.
+- **v1**: `--since 2024-01-01`, sharded output, plus `metadata.leakage` flags. Same upstream
+  HEAD as v0. Earlier LLVM commits mostly reference Bugzilla, which the pipeline does not read.
+
+Upstream HEAD and the exact command are in `data/llvm/<ver>/COMMAND.txt`.
 
 ## GitHub API
 
@@ -28,7 +29,13 @@ pass around an hour. See `docs/decisions.md`.
 
 ## Results
 
-Funnel (`data/llvm/v0/STATS.md`): 73,215 candidates → 70,835 non-revert (LLVM has no merge
+**v1** (`data/llvm/v1/STATS.md`): 110,841 candidates → 106,646 non-revert → 8,632 with an
+`llvm/llvm-project` issue reference → 8,357 instances after the gold-file gates and issue
+lookup (149 commits referenced only pull requests, 1 a deleted issue). All 8,357 validate;
+two shards, 45.0 MB + 17.7 MB. Leakage over the full set: path 14.8%, basename 23.2%,
+patched function 19.0%.
+
+**v0** funnel (`data/llvm/v0/STATS.md`): 73,215 candidates → 70,835 non-revert (LLVM has no merge
 commits) → 6,920 with an `llvm/llvm-project` issue reference → 6,253 with gold files →
 5,831 with 1–5 gold files → **5,794 instances** with a problem statement (38 commits
 referenced only pull requests; no referenced issue was missing). `scripts/validate.py`:

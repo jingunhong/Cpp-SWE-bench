@@ -76,3 +76,27 @@ Conservative choices made without feedback, newest last. Dates are absolute.
   connection drops, timeouts and 5xx responses; 403/429 sleep until the quota resets; any
   other HTTP error aborts the run. The first LLVM run died on a `RemoteDisconnected` after
   562 issues; the cache made the restart free.
+
+## 2026-09-05 — leakage and v1
+
+- **Full-set leakage (v0).** Linux: 4.9% of problem statements name a gold path verbatim,
+  6.9% a gold basename, 53.0% a function patched by the fix. LLVM: 14.4% path, 23.3%
+  basename, 20.9% function.
+- **No masking.** Real bug reports name functions and files; rewriting the text would make
+  the instances less faithful and the masking itself is another labeling step that can be
+  wrong. Instead every instance now carries `metadata.leakage = {path, basename, function}`
+  so consumers can filter or stratify, and STATS.md reports the totals. Revisit if an
+  evaluation needs a leakage-free subset larger than what filtering leaves.
+- **Function-name leakage is measured from hunk headers**, i.e. git's default C/C++
+  funcname heuristic on the patch; it is a proxy, not a gold function label.
+- **v1 = full ranges + leakage flags, sharded.** `write_jsonl` splits above 45 MB into
+  `instances-NNN.jsonl`; readers glob `instances*.jsonl`. Linux v1 covers commits since
+  2022-01-01, LLVM v1 since 2024-01-01 (GitHub issues start in late 2021; earlier LLVM
+  commits reference Bugzilla, which the pipeline does not read). Schema unchanged.
+- **v0 is kept as is**; it is a strict subset range of v1 without the flags.
+- **`git log --since` is not exactly reproducible at the boundary.** Two runs over the same
+  HEAD counted 412,587 and 412,585 candidates (git prunes the walk heuristically when it
+  meets commits older than the bound); the surviving instances were identical. A future
+  version should pin the range by commit (`<sha>..HEAD`) instead of by date.
+- **Patch phase parallelised** with 8 threads of read-only git calls; results are
+  deterministic (ordered map), so output does not depend on scheduling.

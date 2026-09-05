@@ -20,9 +20,11 @@ Design goals:
 | Directory | Upstream | Problem statement | Range | Instances | Notes |
 |---|---|---|---|---:|---|
 | `data/linux/v0/` | `torvalds/linux` | commit message (trailers stripped) | commits since 2026-01-01 | 14,918 | candidates carry a `Fixes: <sha>` trailer |
+| `data/linux/v1/` | `torvalds/linux` | commit message (trailers stripped) | commits since 2022-01-01 | 63,115 | v0 rules, full range, sharded, `metadata.leakage` |
 | `data/llvm/v0/` | `llvm/llvm-project` | GitHub issue title + body | commits since 2025-01-01 | 5,794 | candidates say `Fixes #N` / `Closes #N` / `Resolves <issue url>` |
+| `data/llvm/v1/` | `llvm/llvm-project` | GitHub issue title + body | commits since 2024-01-01 | 8,357 | v0 rules, full range, two shards, `metadata.leakage` |
 
-Each directory holds `instances.jsonl`, `STATS.md` (the filter funnel with counts) and `COMMAND.txt` (exact command line, extractor commit, upstream HEAD). Per-repository notes and a leakage probe live in `docs/extraction-<repo>.md`; every judgment call is logged in `docs/decisions.md`.
+Each directory holds `instances.jsonl` (or `instances-000.jsonl`, `instances-001.jsonl`, … when one file would exceed 45 MB; read them with a glob), `STATS.md` (the filter funnel with counts) and `COMMAND.txt` (exact command line, extractor commit, upstream HEAD). Per-repository notes and a leakage probe live in `docs/extraction-<repo>.md`; every judgment call is logged in `docs/decisions.md`.
 
 ## Instance schema
 
@@ -42,7 +44,7 @@ One JSON object per line (`data/<repo>/<version>/instances.jsonl`).
 | `patch` | str | Unified diff of the fix restricted to `gold_files` |
 | `metadata` | object | Extractor version, referenced issue/bug IDs, filter decisions |
 
-Fields beyond `metadata` are frozen per dataset version; additions go into `metadata` until the next version. In v0 `metadata` contains `extractor_version`, `references` (the `Fixes:` SHA prefixes or issue numbers as written in the commit message), `filters` (the funnel stages applied), `changed_files_total` (all files the fix touched, including non-gold ones) and, for issue-backed instances, `issue_number` and `issue_url`.
+Fields beyond `metadata` are frozen per dataset version; additions go into `metadata` until the next version. In v0 `metadata` contains `extractor_version`, `references` (the `Fixes:` SHA prefixes or issue numbers as written in the commit message), `filters` (the funnel stages applied), `changed_files_total` (all files the fix touched, including non-gold ones), for issue-backed instances `issue_number` and `issue_url`, and from v1 on `leakage` (`{path, basename, function}`: whether the problem statement names a gold path, a gold basename, or a function from the patch's hunk headers verbatim).
 
 ## Filters
 
@@ -89,10 +91,11 @@ Do not run status-style git commands (or leave an editor/shell) inside a `--no-c
 ## Regenerating a dataset
 
 ```bash
-uv run python scripts/extract.py --repo linux --since 2026-01-01 --out data/linux/v0/
-GITHUB_TOKEN=... uv run python scripts/extract.py --repo llvm --since 2025-01-01 --out data/llvm/v0/
-uv run python scripts/validate.py data/linux/v0/instances.jsonl
-uv run python scripts/leakage.py data/linux/v0/instances.jsonl --n 20
+uv run python scripts/extract.py --repo linux --since 2022-01-01 --out data/linux/v1/
+GITHUB_TOKEN=... uv run python scripts/extract.py --repo llvm --since 2024-01-01 --out data/llvm/v1/
+uv run python scripts/validate.py data/linux/v1/instances*.jsonl
+uv run python scripts/leakage.py data/linux/v1/instances*.jsonl          # whole set
+uv run python scripts/leakage.py data/linux/v0/instances.jsonl --n 20    # sampled table
 ```
 
 `--since` is passed to `git log` (committer date). Issue-backed repositories read `GITHUB_TOKEN` if set (5,000 requests/hour) and otherwise run unauthenticated at 60 requests/hour; responses are cached under `repos/cache/` so re-runs are offline. `--no-patch` skips patch generation for a quick funnel count.

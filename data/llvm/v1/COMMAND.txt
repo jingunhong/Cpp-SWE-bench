@@ -1,0 +1,3 @@
+command: scripts/extract.py --repo llvm --since 2024-01-01 --out data/llvm/v1/
+extractor git SHA: 43038d819159ba0d86b25fc757dfb5b23ce78f2b
+upstream HEAD: 3efd20d463e1b1210d2ff07cd79b68d6fa215f24
