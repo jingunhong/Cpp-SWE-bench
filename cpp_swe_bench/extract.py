@@ -83,10 +83,25 @@ def _first_report(inst: Instance, sources: list[Source], drops: Counter):
     return None
 
 
+def warm_caches(instances: list[Instance], sources: list[Source]) -> None:
+    """Fetch every ref of every source into the cache, one thread per source (the sources
+    are different hosts, each paced on its own), so :func:`add_reports` runs offline.
+    Fetches a few refs a sequential resolution would have skipped; harmless."""
+
+    def fill(src: Source) -> None:
+        for inst in instances:
+            for ref in inst.metadata["report_refs"].get(src.name, ()):
+                src.get(ref)
+
+    with ThreadPoolExecutor(len(sources) or 1) as pool:
+        list(pool.map(fill, sources))
+
+
 def add_reports(instances: list[Instance], sources: list[Source], drops: Counter) -> None:
     """Fill ``problem_statement``/``problem_source`` from the first ref (sources in order,
     refs in message order) that resolves to a report; every failed ref is counted in
     ``drops`` as ``"<source>: <reason>"``. Instances without a report keep None."""
+    warm_caches(instances, sources)
     for inst in instances:
         found = _first_report(inst, sources, drops)
         if found:
