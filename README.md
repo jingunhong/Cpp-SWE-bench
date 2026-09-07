@@ -27,6 +27,7 @@ Design goals:
 | `data/llvm/v1/` | `llvm/llvm-project` | GitHub issue title + body | commits since 2024-01-01 | 8,357 | v0 rules, full range, two shards, `metadata.leakage` |
 | `data/systemd/v0/` | `systemd/systemd` | GitHub issue title + body | commits since 2022-01-01 | 1,418 | candidates reference a systemd issue |
 | `data/clickhouse/v0/` | `ClickHouse/ClickHouse` | GitHub issue title + body | commits since 2022-01-01 | 1,022 | candidates reference a ClickHouse issue |
+| `data/linux/v2/` | `torvalds/linux` | syzbot / lore / bugzilla report (5,424) or `null` | commits since 2022-01-01 | 63,115 | v2 schema, v1 range, five shards; 91% carry no linked report |
 | `data/postgres/v2/` | `postgres/postgres` | archive message (1,318) or `null` | commits since 2022-01-01 | 1,333 | v2 schema; `BUG #` message of the `Discussion:` thread, else its first message |
 | `data/qemu/v2/` | `qemu/qemu` | GitLab issue (677) or `null` | commits since 2022-01-01 | 2,821 | v2 schema; GitLab issue URLs are a candidate signal too |
 | `data/llvm/v2/` | `llvm/llvm-project` | GitHub issue (8,357) or `null` | commits since 2024-01-01 | 8,504 | v2 schema, v1 range and cache, two shards |

@@ -202,3 +202,21 @@ Survey (git-side funnel only, instances = 1–5 gold files; issue repos since 20
 - **Report caches are warmed one thread per source** (`extract.warm_caches`) before the
   sequential resolution, so the three Linux hosts are fetched concurrently; this fetches a
   few refs the resolution order would have skipped, which only fills the cache.
+
+## 2026-09-07 — v2 results
+
+| Dataset | Instances | With a report | Sources | Drops (refs) |
+|---|---:|---:|---|---|
+| linux v2 | 63,115 | 5,424 (8.6%) | syzbot 1,809; lore 3,087; bugzilla 528 | lore: 230 patch posts, 124 not found; syzbot: 4 not found |
+| qemu v2 | 2,821 | 677 (24.0%) | gitlab_issue | 8 not found |
+| postgres v2 | 1,333 | 1,318 (98.9%) | pgsql_archive | 11 not found |
+| llvm v2 | 8,504 | 8,357 (98.3%) | github_issue | 149 pull requests, 1 not found |
+| systemd v2 | 1,424 | 1,418 (99.6%) | github_issue | 7 pull requests |
+| clickhouse v2 | 1,049 | 1,022 (97.4%) | github_issue | 29 pull requests |
+
+- **Run order.** All six ran in parallel (different hosts and caches); Linux was restarted
+  three times from its cache (syzbot login redirect, syzbot pacing, the `Re: [PATCH`
+  rule), each restart free. Every output validates with 0 invalid and 0 duplicate ids.
+- **Not done.** Launchpad fetcher (6 refs), PR-merge walking, `gold_functions`, masking,
+  splits: out of scope as specified. `Bug: #N` without a `Discussion:` URL stays
+  unresolved (4 PostgreSQL instances).

@@ -1,4 +1,4 @@
-# Linux extraction (v0, v1)
+# Linux extraction (v0, v1, v2)
 
 Upstream: `torvalds/linux`, blob-less clone at `repos/linux`. Candidates are non-merge,
 non-revert commits whose message carries a `Fixes: <sha> ("...")` trailer. The problem
@@ -66,3 +66,42 @@ Function names leak in roughly half the sample: kernel commit subjects are conve
 `subsystem: function_name: what was wrong`, and bodies routinely quote the function being
 fixed. Paths are rarer. Nothing is scrubbed in v0; a later version should at least measure
 this on the full set and consider masking identifiers or evaluating on the body only.
+
+## v2: original reports as problem statements
+
+`data/linux/v2/` (same clone, HEAD, range and funnel as v1: 63,115 instances, five shards
+of 45 MB, 45 MB, 45 MB, 45 MB and 38 MB). `problem_statement` is the original report when
+the commit links one, resolved in the order syzbot → lore `Closes:` → bugzilla.kernel.org;
+the commit message moved to `commit_message`. `Link:` is recorded in
+`metadata.report_refs.link` (42,561 instances) and never fetched.
+
+### Reports
+
+| Source | Instances with a ref | Resolved | Drops (refs) |
+|---|---:|---:|---|
+| `syzbot` (`Reported-by: syzbot+…`, `syzkaller.appspot.com/bug?…`): bug title + first crash report | 1,812 | 1,809 | 4 not found (login-only namespace) |
+| `lore_report` (`Closes: https://lore.kernel.org/…`): subject + body, quotes and signature stripped | 3,853 | 3,087 | 230 `[PATCH …]` posts, 124 not found |
+| `kernel_bugzilla` (`bugzilla.kernel.org/show_bug.cgi?id=N`): summary + first comment | 548 | 528 | (private bugs are cached as not found; none hit) |
+| any | 5,752 (9.1%) | **5,424 (8.6%)** | |
+| `problem_statement: null` | | **57,691 (91.4%)** | |
+
+That is the honest picture: over 90% of `Fixes:` commits link no report at all, only the
+patch's own submission (`Link:`). The kernel's `Closes:` convention dates from 2023, so the
+report rate rises over the range.
+
+Leakage: `problem_statement` (5,424 instances) path 54.6%, basename 56.2%, patched function
+44.3%; `commit_message` (63,115) path 6.4%, basename 8.6%, function 39.4%. Crash dumps and
+build logs name files and functions almost by definition (`WARNING: mm/vma.h:277 at
+vma_set_pgoff`), so report-backed Linux instances leak far more than commit messages at the
+file level; nothing is masked, the flags are there to stratify on.
+
+Report length: syzbot median 4,036 characters (longest 145k), lore 2,408 (longest 545k, a
+kernel test robot mail with its config attached inline), bugzilla 1,541. Lore reports
+include kernel test robot build/sparse warnings (`oe-kbuild-all`), reviewer replies to
+patches (`Re: [PATCH …]`, including automated review bots) and human reports.
+
+Practical: all fetching goes through `repos/cache/<source>/`; the syzkaller dashboard
+throttles an IP at ~20 requests/minute, so `Syzbot.pace = 3 s` and the ~1,900 bugs (two
+requests each) take about 3.5 hours; lore and bugzilla run at 0.5 s pace in parallel
+threads. The blob-less clone rules above still apply; the v2 patch phase reused the blobs
+fetched for v1.
