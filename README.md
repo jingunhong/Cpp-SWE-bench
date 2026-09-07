@@ -41,14 +41,26 @@ One JSON object per line (`data/<repo>/<version>/instances.jsonl`).
 | `base_commit` | str | Full SHA of the snapshot to localize in (parent of the fix) |
 | `fix_commit` | str | Full SHA of the fixing commit |
 | `created_at` | str | ISO-8601 author timestamp of the fix commit |
-| `problem_statement` | str | Natural-language defect description (issue report, or commit message with trailers stripped) |
-| `problem_source` | str | Where `problem_statement` came from (`github_issue`, `commit_message`, …) |
+| `problem_statement` | str \| null | The original bug report (title + body) when the repository's history links to one; `null` otherwise (v2) |
+| `problem_source` | str \| null | Where the report came from: `github_issue`, `gitlab_issue`, `syzbot`, `lore_report`, `kernel_bugzilla`, `pgsql_archive`; `null` exactly when `problem_statement` is `null` (v2) |
+| `commit_message` | str | The fix's commit message with trailers stripped; always present (v2) |
 | `gold_files` | list[str] | Repo-relative paths of non-test C/C++ source files changed by the fix |
 | `gold_functions` | list[str] \| null | `path::function` labels; `null` when not extracted |
 | `patch` | str | Unified diff of the fix restricted to `gold_files` |
 | `metadata` | object | Extractor version, referenced issue/bug IDs, filter decisions |
 
-Fields beyond `metadata` are frozen per dataset version; additions go into `metadata` until the next version. In v0 `metadata` contains `extractor_version`, `references` (the `Fixes:` SHA prefixes or issue numbers as written in the commit message), `filters` (the funnel stages applied), `changed_files_total` (all files the fix touched, including non-gold ones), for issue-backed instances `issue_number` and `issue_url`, and from v1 on `leakage` (`{path, basename, function}`: whether the problem statement names a gold path, a gold basename, or a function from the patch's hunk headers verbatim).
+Fields beyond `metadata` are frozen per dataset version; additions go into `metadata` until the next version.
+
+**v2 semantics.** `problem_statement` holds the original report *only*. A commit message is written by the fixer after the fix and describes diagnosis and solution, which is a different and easier localization task than the report; the dataset never presents one as the other. When no report is linked from the commit (or the link does not resolve), the instance is kept with `problem_statement: null` and `problem_source: null`; whether to fall back to `commit_message` at training time is the consumer's decision. In v0/v1, `problem_statement` was the commit message for Linux, QEMU and PostgreSQL (`problem_source = "commit_message"`); v2 moves that text to `commit_message`.
+
+`metadata` contains:
+
+- `extractor_version`, `filters` (the funnel stages applied), `changed_files_total` (all files the fix touched, including non-gold ones);
+- `references`: what made the commit a candidate (`Fixes:` SHA prefixes, GitLab issue URLs, issue numbers, or PostgreSQL bug numbers / `Discussion:` URLs as written);
+- `report_refs` (v2): the report links found in the commit message, grouped by kind and stored even when fetching fails, so yield can be measured offline. Keys are the source names above plus fetcher-less kinds `link` (`Link:` URLs), `launchpad` (QEMU Launchpad bug URLs) and `pgsql_bug` (`#N` from `Bug: #N`);
+- `report_url` (v2) for instances with a report, plus `issue_number` and `issue_url` for `github_issue`;
+- `leakage`: `{path, basename, function}` computed against `problem_statement` (whether it names a gold path, a gold basename, or a function from the patch's hunk headers verbatim); `null` when `problem_statement` is `null` (v1+);
+- `commit_message_leakage` (v2): the same three flags computed against `commit_message`. The two are never mixed; `STATS.md` reports each over its own denominator.
 
 ## Filters
 

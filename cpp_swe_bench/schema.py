@@ -12,9 +12,11 @@ _REQUIRED_STR = (
     "base_commit",
     "fix_commit",
     "created_at",
-    "problem_statement",
-    "problem_source",
+    "commit_message",
     "patch",
+)
+SOURCES = frozenset(
+    {"github_issue", "gitlab_issue", "syzbot", "lore_report", "kernel_bugzilla", "pgsql_archive"}
 )
 
 
@@ -25,8 +27,9 @@ class Instance:
     base_commit: str
     fix_commit: str
     created_at: str
-    problem_statement: str
-    problem_source: str
+    problem_statement: str | None
+    problem_source: str | None
+    commit_message: str
     gold_files: list[str]
     gold_functions: list[str] | None
     patch: str
@@ -46,6 +49,13 @@ class Instance:
             value = getattr(self, name)
             if not isinstance(value, str) or not value:
                 errors.append(f"{name}: required non-empty string")
+        if self.problem_statement is None:
+            if self.problem_source is not None:
+                errors.append("problem_source: must be null when problem_statement is null")
+        elif not isinstance(self.problem_statement, str) or not self.problem_statement:
+            errors.append("problem_statement: must be null or a non-empty string")
+        elif self.problem_source not in SOURCES:
+            errors.append(f"problem_source: must be one of {sorted(SOURCES)}")
         for name in ("base_commit", "fix_commit"):
             if not _SHA_RE.match(getattr(self, name) or ""):
                 errors.append(f"{name}: not a full 40-char lowercase SHA")

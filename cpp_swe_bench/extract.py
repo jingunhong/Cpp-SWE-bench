@@ -1,10 +1,12 @@
 """The extraction pipeline: git history -> filtered Instance records + funnel counts."""
 
+from collections import Counter
 from collections.abc import Callable, Iterator
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from . import EXTRACTOR_VERSION, filters, gitutil, leakage
+from .reports import Source
 from .schema import Instance
 
 FILTER_ORDER = ("not merge", "not revert", "has reference", "has gold files", "1-5 gold files")
@@ -17,17 +19,17 @@ def mine(
     *,
     since: str | None,
     references: Callable[[str], list],
-    problem: Callable[[gitutil.Commit], tuple[str, str, dict] | None],
+    refs: dict[str, Callable[[str], list[str]]],
     funnel: dict[str, int],
 ) -> Iterator[Instance]:
-    """Yield instances without ``patch`` (filled by :func:`add_patches`).
+    """Yield instances without ``patch`` (see :func:`add_patches`) and without a report
+    (see :func:`add_reports`); ``problem_statement`` starts out None.
 
     ``references(message)`` returns the issue/commit references that make a commit a
-    candidate; ``problem(commit)`` returns ``(statement, source, extra_metadata)`` or
-    None to drop.
-    ``funnel`` is updated in place with survivor counts per stage.
+    candidate; ``refs`` maps a report-ref kind to its parser, and every non-empty result
+    lands in ``metadata.report_refs``. ``funnel`` is updated in place with survivor counts.
     """
-    for stage in ("candidates", *FILTER_ORDER, "has problem statement"):
+    for stage in ("candidates", *FILTER_ORDER):
         funnel.setdefault(stage, 0)
     for c in gitutil.log(repo, since=since, files=True):
         funnel["candidates"] += 1
@@ -37,8 +39,8 @@ def mine(
         if filters.is_revert(c.message):
             continue
         funnel["not revert"] += 1
-        refs = references(c.message)
-        if not refs:
+        candidate_refs = references(c.message)
+        if not candidate_refs:
             continue
         funnel["has reference"] += 1
         gold = filters.gold_files(c.files)
@@ -48,35 +50,57 @@ def mine(
         if not filters.file_count_ok(gold):
             continue
         funnel["1-5 gold files"] += 1
-        found = problem(c)
-        if not found:
-            continue
-        funnel["has problem statement"] += 1
-        statement, source, extra = found
         yield Instance(
             instance_id=f"{repo_name}__{c.sha[:12]}",
             repo=upstream,
             base_commit=c.parents[0],
             fix_commit=c.sha,
             created_at=c.author_date,
-            problem_statement=statement,
-            problem_source=source,
+            problem_statement=None,
+            problem_source=None,
+            commit_message=filters.strip_trailers(c.message),
             gold_files=gold,
             gold_functions=None,
             patch="",
             metadata={
                 "extractor_version": EXTRACTOR_VERSION,
-                "references": refs,
+                "references": candidate_refs,
+                "report_refs": {k: v for k, f in refs.items() if (v := f(c.message))},
                 "filters": list(FILTER_ORDER),
                 "changed_files_total": len(c.files),
-                **extra,
             },
         )
 
 
+def _first_report(inst: Instance, sources: list[Source], drops: Counter):
+    for src in sources:
+        for ref in inst.metadata["report_refs"].get(src.name, ()):
+            got = src.report(ref)
+            if isinstance(got, str):
+                drops[f"{src.name}: {got}"] += 1
+            else:
+                return src.name, got
+    return None
+
+
+def add_reports(instances: list[Instance], sources: list[Source], drops: Counter) -> None:
+    """Fill ``problem_statement``/``problem_source`` from the first ref (sources in order,
+    refs in message order) that resolves to a report; every failed ref is counted in
+    ``drops`` as ``"<source>: <reason>"``. Instances without a report keep None."""
+    for inst in instances:
+        found = _first_report(inst, sources, drops)
+        if found:
+            name, (title, body, extra) = found
+            inst.problem_statement = f"{title.strip()}\n\n{body.strip()}".strip()
+            inst.problem_source = name
+            inst.metadata.update(extra)
+
+
 def add_patches(repo: Path, instances: list[Instance], workers: int = 8) -> None:
-    """Fill ``patch`` and ``metadata.leakage`` for every instance, bulk-fetching blobs first
-    on partial clones. Read-only git calls run in parallel threads."""
+    """Fill ``patch``, ``metadata.leakage`` (flags of ``problem_statement``, None without one)
+    and ``metadata.commit_message_leakage`` (flags of ``commit_message``) for every
+    instance, bulk-fetching blobs first on partial clones. Read-only git calls run in
+    parallel threads."""
     with ThreadPoolExecutor(workers) as pool:
         oids = pool.map(
             lambda i: gitutil.blob_oids(repo, i.base_commit, i.fix_commit, i.gold_files), instances
@@ -88,9 +112,6 @@ def add_patches(repo: Path, instances: list[Instance], workers: int = 8) -> None
         for inst, patch in zip(instances, patches, strict=True):
             inst.patch = patch
             inst.metadata["leakage"] = leakage.flags(inst.problem_statement, inst.gold_files, patch)
-
-
-def commit_message_problem(c: gitutil.Commit) -> tuple[str, str, dict] | None:
-    """Problem statement = commit message with trailers stripped."""
-    text = filters.strip_trailers(c.message)
-    return (text, "commit_message", {}) if text else None
+            inst.metadata["commit_message_leakage"] = leakage.flags(
+                inst.commit_message, inst.gold_files, patch
+            )

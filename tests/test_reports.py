@@ -1,0 +1,196 @@
+import json
+from collections import Counter
+from pathlib import Path
+
+import pytest
+
+from cpp_swe_bench import extract, filters, reports
+from tests.test_schema import make
+
+LINUX = """\
+mm/mremap: reset unfaulted VMA page offset
+
+Reported-by: syzbot+f12658786a4153df5113@syzkaller.appspotmail.com
+Closes: https://syzkaller.appspot.com/bug?extid=f12658786a4153df5113
+Reported-by: kernel test robot <lkp@intel.com>
+Closes: https://lore.kernel.org/oe-kbuild-all/202401011234.abcd-lkp@intel.com/
+Closes: https://lore.kernel.org/r/20260608025043.88087-1-cuiyunhui@bytedance.com.
+Closes: https://lore.kernel.org/netdev/CAHk-=wg@mail.gmail.com/T/#u
+Closes: https://bugzilla.kernel.org/show_bug.cgi?id=221485
+Link: https://bugzilla.kernel.org/show_bug.cgi?id=218000#c14
+Link: https://lore.kernel.org/r/20240101-fix-v1-1-abc@kernel.org
+Tested-by: syzbot+d6dd6f86d3aaf7eebe74@syzkaller.appspotmail.com
+Signed-off-by: A <a@x>
+"""
+SYZ_ID = "d6dd6f86d3aaf7eebe7406e45c1c6e549453f224"
+
+
+@pytest.fixture
+def cache(tmp_path: Path) -> Path:
+    return tmp_path / "cache"
+
+
+def test_linux_ref_parsers(cache: Path):
+    syz, lore, bz = reports.Syzbot(cache), reports.Lore(cache), reports.Bugzilla(cache)
+    assert syz.refs(LINUX) == ["extid=f12658786a4153df5113", "extid=d6dd6f86d3aaf7eebe74"]
+    assert syz.refs(f"Closes: https://syzkaller.appspot.com/bug?id={SYZ_ID}") == [f"id={SYZ_ID}"]
+    assert lore.refs(LINUX) == [
+        "https://lore.kernel.org/oe-kbuild-all/202401011234.abcd-lkp@intel.com/",
+        "https://lore.kernel.org/r/20260608025043.88087-1-cuiyunhui@bytedance.com",
+        "https://lore.kernel.org/netdev/CAHk-=wg@mail.gmail.com/T/#u",
+    ]
+    assert lore._MSGID_RE.match(lore.refs(LINUX)[2])[1] == "CAHk-=wg@mail.gmail.com"
+    assert bz.refs(LINUX) == [
+        "https://bugzilla.kernel.org/show_bug.cgi?id=221485",
+        "https://bugzilla.kernel.org/show_bug.cgi?id=218000",
+    ]
+    assert reports.link_urls(LINUX) == [
+        "https://bugzilla.kernel.org/show_bug.cgi?id=218000#c14",
+        "https://lore.kernel.org/r/20240101-fix-v1-1-abc@kernel.org",
+    ]
+
+
+def test_qemu_and_postgres_ref_parsers(cache: Path):
+    qemu = (
+        "hw/ide: fix\n\nResolves: https://gitlab.com/qemu-project/qemu/-/issues/4038\n"
+        "Fixes: https://gitlab.com/qemu-project/qemu/-/issues/4038\n"
+        "Buglink: https://bugs.launchpad.net/qemu/+bug/1234\n"
+        "Resolves: https://gitlab.com/other/proj/-/issues/1\nResolves: Coverity CID 1\n"
+    )
+    issue = "https://gitlab.com/qemu-project/qemu/-/issues/4038"
+    assert reports.gitlab_issue_refs(qemu, "qemu-project/qemu") == [issue]
+    assert reports.GitLab(cache, "qemu-project/qemu").refs(qemu) == [issue]
+    assert reports.launchpad_refs(qemu) == ["https://bugs.launchpad.net/qemu/+bug/1234"]
+    pg = (
+        "Fix bug\n\nBug: #19441\n"
+        "Discussion: https://postgr.es/m/19441-ec29f3b1363b4a68@postgresql.org\n"
+        "Discussion: https://www.postgresql.org/message-id/flat/19637-4446f7%40postgresql.org\n"
+        "Discussion: http://postgr.es/m/abc@x.\nBackpatch-through: 13\n"
+    )
+    src = reports.PgArchive(cache)
+    assert src.refs(pg) == [
+        "https://postgr.es/m/19441-ec29f3b1363b4a68@postgresql.org",
+        "https://www.postgresql.org/message-id/flat/19637-4446f7%40postgresql.org",
+        "http://postgr.es/m/abc@x",
+    ]
+    ids = [src._MSGID_RE.search(r)[1] for r in src.refs(pg)]
+    assert ids == [
+        "19441-ec29f3b1363b4a68@postgresql.org",
+        "19637-4446f7%40postgresql.org",
+        "abc@x",
+    ]
+    assert reports.pgsql_bug_refs(pg) == ["#19441"]
+    assert reports.pgsql_bug_refs("Bug: 17654\n") == ["#17654"]
+
+
+def _pg_message(subject: str, msgid: str, body_html: str) -> str:
+    return (
+        f'<a name="{msgid}"></a><table class="message-header"><tr><th scope="row">From:</th>'
+        f'<td>X</td></tr><tr><th scope="row">Subject:</th>\n  <td>{subject}</td></tr>'
+        f'<tr><th scope="row">Message-ID:</th>\n  <td><a href="/message-id/x">{msgid}</a></td>'
+        f'</tr></table>\n<div class="message-content">{body_html}</div>\n'
+    )
+
+
+def test_pg_thread_root_and_bug_selection(cache: Path):
+    bug_body = (
+        "<p>The following bug has been logged:</p><p>&gt; quoted<br>step 1<br>step &amp; 2</p>"
+    )
+    page = (
+        _pg_message("Patch v1", "a@x", "<p>see patch</p>")
+        + _pg_message("BUG #19441: hang", "19441-x@postgresql.org", bug_body + "<p>-- <br>sig</p>")
+        + _pg_message("Re: BUG #19441: hang", "b@x", "<p>reply</p>")
+    )
+    src = reports.PgArchive(cache)
+    msgs = src.messages(page)
+    assert [m[0] for m in msgs] == ["Patch v1", "BUG #19441: hang", "Re: BUG #19441: hang"]
+    assert src.pick(msgs)[1] == "19441-x@postgresql.org"
+    assert src.parse("ref", page) == (
+        "BUG #19441: hang",
+        "The following bug has been logged:\n\nstep 1\nstep & 2",
+        {"report_url": "https://www.postgresql.org/message-id/19441-x%40postgresql.org"},
+    )
+    root = _pg_message("Planner crash", "root@x", "<p>root</p>")
+    assert src.parse("ref", root + _pg_message("Re: Planner crash", "r@x", "<p>re</p>"))[0] == (
+        "Planner crash"
+    )
+    assert src.parse("ref", "<html></html>") == "no message on page"
+
+
+def test_lore_parse_strips_quotes_and_rejects_patches(cache: Path):
+    raw = (
+        "From: R <r@x>\nSubject: [bug report] foo: null deref\n  in bar()\n"
+        "Content-Type: text/plain\n\n"
+        "Hi,\n\nOn Mon, X wrote:\n> old\n> lines\n\nfoo crashes.\n\n\n\nMore.\n-- \nsig\n"
+    )
+    src = reports.Lore(cache)
+    assert src.parse("https://lore.kernel.org/r/a@b", raw) == (
+        "[bug report] foo: null deref in bar()",
+        "Hi,\n\nOn Mon, X wrote:\n\nfoo crashes.\n\nMore.",
+        {"report_url": "https://lore.kernel.org/r/a@b"},
+    )
+    for subject in ("[PATCH v2 1/3] mm: fix", "Re: [RFC PATCH] x", "[PATCH net-next] y"):
+        assert src.parse("u", f"Subject: {subject}\n\nbody\n") == "target is a patch"
+    only_quotes = "Subject: [syzbot] KASAN: x\n\n> only quotes\n"
+    assert src.parse("u", only_quotes) == ("[syzbot] KASAN: x", "", {"report_url": "u"})
+
+
+def test_syzbot_bugzilla_gitlab_github_parse(cache: Path):
+    syz = reports.Syzbot(cache)
+    raw = {"bug": {"title": "WARNING in vma_set_pgoff"}, "report": "------------[ cut here ]"}
+    assert syz.parse("extid=f1", raw) == (
+        "WARNING in vma_set_pgoff",
+        "------------[ cut here ]",
+        {"report_url": "https://syzkaller.appspot.com/bug?extid=f1"},
+    )
+    assert syz.parse("extid=f1", {"bug": {"title": ""}, "report": None}) == "empty report"
+    bz = reports.Bugzilla(cache)
+    with_comment = {"bug": {"summary": "s"}, "comment": {"text": "c"}}
+    assert bz.parse("u", with_comment) == ("s", "c", {"report_url": "u"})
+    assert bz.parse("u", {"bug": {"summary": "s"}, "comment": None})[1] == ""
+    gl = reports.GitLab(cache, "qemu-project/qemu")
+    issue = {"title": "t", "description": None, "web_url": "w"}
+    assert gl.parse("u", issue) == ("t", "", {"report_url": "w"})
+    gh = reports.GitHub(cache, "o/r", token=None)
+    assert (cache / "github_issue/o__r").is_dir()
+    assert gh.refs("Fixes #12, closes: #7") == ["12", "7"]
+    assert filters.issue_refs("Fixes #12", "o/r") == [12]
+    assert gh.parse("7", {"title": "PR", "pull_request": {}}) == "reference is a pull request"
+    assert gh.parse("9", {"title": " Crash ", "body": " when x \n", "html_url": "u9"}) == (
+        " Crash ",
+        " when x \n",
+        {"issue_number": 9, "issue_url": "u9", "report_url": "u9"},
+    )
+
+
+class Fake(reports.Syzbot):
+    def __init__(self, cache_dir, responses):
+        super().__init__(cache_dir)
+        self.responses, self.calls = responses, []
+
+    def fetch(self, ref):  # no network
+        self.calls.append(ref)
+        return self.responses[ref]
+
+
+def test_cache_and_add_reports(cache: Path):
+    src = Fake(cache, {"extid=aa": None, "extid=bb": {"bug": {"title": "T"}, "report": "R"}})
+    assert src.report("extid=aa") == "not found"
+    assert src.report("extid=aa") == "not found"  # second call served from the cache
+    assert json.loads((cache / "syzbot/extid%3Daa.json").read_text()) is None
+    assert src.calls == ["extid=aa"]
+
+    hit = make(problem_statement=None, problem_source=None)
+    hit.metadata["report_refs"] = {"syzbot": ["extid=aa", "extid=bb"]}
+    miss = make(problem_statement=None, problem_source=None)
+    miss.metadata["report_refs"] = {"syzbot": ["extid=aa"]}
+    none = make(problem_statement=None, problem_source=None)
+    none.metadata["report_refs"] = {}
+    drops: Counter[str] = Counter()
+    extract.add_reports([hit, miss, none], [src], drops)
+    assert (hit.problem_statement, hit.problem_source) == ("T\n\nR", "syzbot")
+    assert hit.metadata["report_url"] == "https://syzkaller.appspot.com/bug?extid=bb"
+    assert miss.problem_statement is None and miss.problem_source is None
+    assert none.problem_statement is None
+    assert drops == {"syzbot: not found": 2}
+    assert all(i.validate() == [] for i in (hit, miss, none))

@@ -15,7 +15,8 @@ def make(**overrides) -> Instance:
         fix_commit="b" * 40,
         created_at="2023-02-01T10:00:00+00:00",
         problem_statement="broken",
-        problem_source="commit_message",
+        problem_source="github_issue",
+        commit_message="fix: broken",
         gold_files=["a.c"],
         gold_functions=None,
         patch="diff",
@@ -33,7 +34,7 @@ def test_roundtrip():
 def test_field_order_matches_readme():
     assert [f.name for f in dataclasses.fields(Instance)] == [
         "instance_id", "repo", "base_commit", "fix_commit", "created_at",
-        "problem_statement", "problem_source", "gold_files", "gold_functions",
+        "problem_statement", "problem_source", "commit_message", "gold_files", "gold_functions",
         "patch", "metadata",
     ]  # fmt: skip
 
@@ -46,8 +47,15 @@ def test_field_order_matches_readme():
         ({"created_at": "yesterday"}, "created_at"),
         ({"gold_files": []}, "gold_files"),
         ({"problem_statement": ""}, "problem_statement"),
+        ({"problem_statement": None}, "problem_source"),
+        ({"problem_source": "commit_message"}, "problem_source"),
+        ({"commit_message": ""}, "commit_message"),
         ({"gold_functions": "a::b"}, "gold_functions"),
     ],
 )
 def test_validate_rejects(overrides, fragment):
     assert any(fragment in e for e in make(**overrides).validate())
+
+
+def test_null_report_is_valid():
+    assert make(problem_statement=None, problem_source=None).validate() == []

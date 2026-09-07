@@ -25,6 +25,7 @@ def test_patched_functions_and_flags():
         "function": False,
     }
     assert leakage.flags("frob_widgets are fine", ["a.c"], PATCH)["function"] is False
+    assert leakage.flags(None, ["a.c"], PATCH) is None
 
 
 def test_write_jsonl_shards(tmp_path: Path):

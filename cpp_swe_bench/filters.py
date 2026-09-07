@@ -91,7 +91,7 @@ def fixes_shas(message: str) -> list[str]:
     return _FIXES_SHA_RE.findall(message)
 
 
-def report_refs(message: str) -> list[str]:
+def pgsql_refs(message: str) -> list[str]:
     """PostgreSQL-style bug references: for commits carrying a ``Reported-by:`` or
     ``Bug: #N`` trailer, the bug numbers and ``Discussion:`` archive URLs; else empty."""
     if not _REPORTED_RE.search(message):

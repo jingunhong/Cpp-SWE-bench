@@ -1,34 +1,73 @@
 """Extract localization instances from a local clone.
 
-uv run python scripts/extract.py --repo linux --since 2022-01-01 --out data/linux/v0/
+uv run python scripts/extract.py --repo linux --since 2022-01-01 --out data/linux/v2/
 """
 
 import argparse
-import functools
 import os
 import shlex
 import subprocess
 import sys
+from collections import Counter
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from cpp_swe_bench import extract, filters, github, gitutil, leakage, writers  # noqa: E402
+from cpp_swe_bench import extract, filters, gitutil, leakage, reports, writers  # noqa: E402
 
-# source "commit_message": candidates carry a Fixes: <sha> trailer (or "references" below);
-# source "github_issue": candidates reference an issue of the upstream repository.
+
+def _qemu_references(message: str) -> list[str]:
+    return filters.fixes_shas(message) + reports.gitlab_issue_refs(message, "qemu-project/qemu")
+
+
+# references: what makes a commit a candidate; sources: report sources in resolution
+# order (built with the cache dir and the GitHub token); refs: extra report-ref kinds
+# recorded in metadata.report_refs without a fetcher.
 REPOS = {
-    "linux": {"upstream": "torvalds/linux", "source": "commit_message"},
-    "qemu": {"upstream": "qemu/qemu", "source": "commit_message"},
+    "linux": {
+        "upstream": "torvalds/linux",
+        "references": filters.fixes_shas,
+        "sources": lambda cache, token: [
+            reports.Syzbot(cache),
+            reports.Lore(cache),
+            reports.Bugzilla(cache),
+        ],
+        "refs": {"link": reports.link_urls},
+    },
+    "qemu": {
+        "upstream": "qemu/qemu",
+        "references": _qemu_references,
+        "sources": lambda cache, token: [reports.GitLab(cache, "qemu-project/qemu")],
+        "refs": {"launchpad": reports.launchpad_refs, "link": reports.link_urls},
+    },
     "postgres": {
         "upstream": "postgres/postgres",
-        "source": "commit_message",
-        "references": filters.report_refs,
+        "references": filters.pgsql_refs,
+        "sources": lambda cache, token: [reports.PgArchive(cache)],
+        "refs": {"pgsql_bug": reports.pgsql_bug_refs},
     },
-    "llvm": {"upstream": "llvm/llvm-project", "source": "github_issue"},
-    "systemd": {"upstream": "systemd/systemd", "source": "github_issue"},
-    "clickhouse": {"upstream": "ClickHouse/ClickHouse", "source": "github_issue"},
 }
+for _name, _upstream in (
+    ("llvm", "llvm/llvm-project"),
+    ("systemd", "systemd/systemd"),
+    ("clickhouse", "ClickHouse/ClickHouse"),
+):
+    REPOS[_name] = {
+        "upstream": _upstream,
+        "references": lambda m, u=_upstream: filters.issue_refs(m, u),
+        "sources": lambda cache, token, u=_upstream: [reports.GitHub(cache, u, token)],
+        "refs": {},
+    }
+
+
+def _leak_summary(instances, key: str) -> str:
+    rows = [i.metadata[key] for i in instances if i.metadata.get(key) is not None]
+    n = len(rows)
+    counts = {flag: sum(1 for r in rows if r[flag]) for flag in leakage.FLAGS}
+    cells = ", ".join(
+        f"{k}: {v} ({100 * v / n:.1f}%)" if n else f"{k}: 0" for k, v in counts.items()
+    )
+    return f"over {n} instances: {cells}"
 
 
 def main() -> None:
@@ -38,6 +77,7 @@ def main() -> None:
     ap.add_argument("--out", required=True, type=Path)
     ap.add_argument("--repos-dir", type=Path, default=Path("repos"))
     ap.add_argument("--no-patch", action="store_true", help="skip patches (dry run for counts)")
+    ap.add_argument("--no-reports", action="store_true", help="skip report fetching")
     args = ap.parse_args()
     extractor_sha = subprocess.run(
         ["git", "rev-parse", "HEAD"], capture_output=True, text=True, check=True
@@ -45,14 +85,8 @@ def main() -> None:
 
     clone = args.repos_dir / args.repo
     cfg = REPOS[args.repo]
-    if cfg["source"] == "github_issue":
-        references = functools.partial(filters.issue_refs, upstream=cfg["upstream"])
-        token = os.environ.get("GITHUB_TOKEN")
-        issues = github.Issues(cfg["upstream"], args.repos_dir / "cache", token)
-        problem = github.IssueProblem(issues)
-    else:
-        references = cfg.get("references", filters.fixes_shas)
-        problem = extract.commit_message_problem
+    token = os.environ.get("GITHUB_TOKEN")
+    sources = cfg["sources"](args.repos_dir / "cache", token)
     funnel: dict[str, int] = {}
     instances = list(
         extract.mine(
@@ -60,22 +94,24 @@ def main() -> None:
             args.repo,
             cfg["upstream"],
             since=args.since,
-            references=references,
-            problem=problem,
+            references=cfg["references"],
+            refs={s.name: s.refs for s in sources} | cfg["refs"],
             funnel=funnel,
         )
     )
     print(f"{len(instances)} instances after filters", file=sys.stderr)
+    drops: Counter[str] = Counter()
+    if not args.no_reports:
+        extract.add_reports(instances, sources, drops)
     if not args.no_patch:
         extract.add_patches(clone, instances)
 
     args.out.mkdir(parents=True, exist_ok=True)
     paths = writers.write_jsonl(args.out, instances)
     n = len(instances)
-    leaks = {
-        flag: sum(1 for i in instances if i.metadata.get("leakage", {}).get(flag))
-        for flag in leakage.FLAGS
-    }
+    with_report = sum(1 for i in instances if i.problem_statement is not None)
+    ref_counts = Counter(k for i in instances for k in i.metadata["report_refs"])
+    by_source = dict(Counter(i.problem_source for i in instances if i.problem_source))
     upstream_head = gitutil.head(clone)
     writers.write_stats(
         args.out / "STATS.md",
@@ -84,17 +120,23 @@ def main() -> None:
         {
             "instances written": n,
             "files": ", ".join(p.name for p in paths),
-            "problem statement names a gold path / basename / patched function": ", ".join(
-                f"{k}: {v} ({100 * v / n:.1f}%)" if n else f"{k}: 0" for k, v in leaks.items()
+            "with a report / without": f"{with_report} / {n - with_report}",
+            "instances with at least one report ref, per kind": dict(ref_counts),
+            "reports by source": by_source,
+            "report drops": dict(drops) if not args.no_reports else "skipped (--no-reports)",
+            "problem statement names a gold path / basename / patched function": _leak_summary(
+                instances, "leakage"
+            ),
+            "commit message names a gold path / basename / patched function": _leak_summary(
+                instances, "commit_message_leakage"
             ),
             "upstream": cfg["upstream"],
             "upstream HEAD": upstream_head,
             "since": args.since,
             "extractor commit": extractor_sha,
             "extractor version": extract.EXTRACTOR_VERSION,
-            "problem source": cfg["source"],
-            "problem statement drops": dict(getattr(problem, "drops", {})),
-            "github token": "GITHUB_TOKEN" if os.environ.get("GITHUB_TOKEN") else "none",
+            "report sources (resolution order)": ", ".join(s.name for s in sources),
+            "github token": "GITHUB_TOKEN" if token else "none",
         },
     )
     (args.out / "COMMAND.txt").write_text(

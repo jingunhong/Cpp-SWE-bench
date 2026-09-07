@@ -38,8 +38,8 @@ def test_report_refs():
         "Reported-by: A <a@x>\nBug: #18123\nDiscussion: https://postgr.es/m/abc@x\n"
         "Backpatch-through: 13\n"
     )
-    assert filters.report_refs(msg) == ["#18123", "https://postgr.es/m/abc@x"]
-    assert filters.report_refs("Add feature\n\nDiscussion: https://postgr.es/m/x\n") == []
+    assert filters.pgsql_refs(msg) == ["#18123", "https://postgr.es/m/abc@x"]
+    assert filters.pgsql_refs("Add feature\n\nDiscussion: https://postgr.es/m/x\n") == []
     assert filters.strip_trailers(msg) == "Fix planner crash\n\nThe planner dereferenced NULL."
 
 

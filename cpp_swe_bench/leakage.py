@@ -12,8 +12,11 @@ def patched_functions(patch: str) -> set[str]:
     return {f for f in _HUNK_FUNC_RE.findall(patch) if f not in _KEYWORDS}
 
 
-def flags(statement: str, gold_files: list[str], patch: str) -> dict[str, bool]:
-    """Whether ``statement`` contains a gold path, a gold basename, or a patched function."""
+def flags(statement: str | None, gold_files: list[str], patch: str) -> dict[str, bool] | None:
+    """Whether ``statement`` contains a gold path, a gold basename, or a patched function;
+    None when there is no statement."""
+    if statement is None:
+        return None
     funcs = patched_functions(patch)
     return {
         "path": any(g in statement for g in gold_files),

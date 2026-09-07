@@ -125,3 +125,71 @@ Survey (git-side funnel only, instances = 1–5 gold files; issue repos since 20
 - Skipped repositories cost one table line to add later; the merge-commit-only link
   pattern (DuckDB, Godot) would need a "walk PR merges and take the PR's commits" rule
   that does not exist yet.
+
+## 2026-09-07 — v2: original reports as problem statements
+
+- **Schema.** `problem_statement` holds the original report only and is `null` when none
+  is linked or none resolves; `problem_source` is `null` exactly then. The old commit-message
+  text moves to a new top-level `commit_message` (always present). `problem_source` values:
+  `github_issue`, `gitlab_issue`, `syzbot`, `lore_report`, `kernel_bugzilla`, `pgsql_archive`.
+  `metadata.leakage` is computed against `problem_statement` (`null` without one);
+  `metadata.commit_message_leakage` against `commit_message`. Never mixed. Instances without
+  a report are kept; the `has problem statement` funnel stage is gone. `extractor_version`
+  0.2.0, output under `data/<repo>/v2/`, v0/v1 untouched.
+- **No fallback, no invented source.** `commit_message` is never copied into
+  `problem_statement`; what consumers do at training time is their decision.
+- **`commit_message` is required non-empty** by `validate()`. No instance in any run so far
+  had an empty stripped message; if one appears, validation flags it rather than the
+  pipeline silently keeping or dropping it.
+- **`metadata.report_refs`** is a dict keyed by kind (source name, or `link`/`launchpad`/
+  `pgsql_bug` for kinds without a fetcher) so per-source yield can be measured offline; the
+  refs are stored as parsed tokens the fetcher takes (URLs as written, `extid=<hash>` for
+  syzbot, issue numbers as strings for GitHub, `#N` for PostgreSQL bug numbers).
+- **One `Source` abstraction** (`cpp_swe_bench/reports.py`) replaces `github.py`: `refs`,
+  `fetch` (raw, JSON-serialisable), `parse`; raw responses cached as JSON under
+  `repos/cache/<source>/` (`null` for 404), shared retry/backoff and rate-limit sleeps.
+  The existing GitHub caches were moved on disk to `repos/cache/github_issue/<owner__repo>/`
+  so the issue-backed re-runs stay offline. Report fetching is a stage in `extract.py`
+  after the git filters and before patches; `--no-reports` skips it.
+- **Step 0 yield** (`--no-patch --no-reports`, same clones and ranges as v1/v0; instances
+  with at least one ref of the kind):
+
+  | Repository | Instances | Fetchable refs | Record-only refs |
+  |---|---:|---|---|
+  | linux (2022+) | 63,115 | lore `Closes:` 3,853; syzbot 1,812; bugzilla.kernel.org 548; any of the three 5,752 (9.1%) | `Link:` 42,561 |
+  | qemu (2022+) | 2,821 (was 2,367: GitLab issue URLs are now a candidate signal) | GitLab issue 683 | `Link:` 294; Launchpad 6 |
+  | postgres (2022+) | 1,333 | `Discussion:` archive URL 1,329 | `Bug: #N` 135 |
+  | llvm (2024+) | 8,504 | GitHub issue 8,504 | |
+  | systemd (2022+) | 1,424 | GitHub issue 1,424 | |
+  | clickhouse (2022+) | 1,049 | GitHub issue 1,049 | |
+
+  The issue-backed counts are before the PR/404 drops that used to happen at the
+  `has problem statement` stage (llvm v1 8,357, systemd v0 1,418, clickhouse v0 1,022);
+  those commits are now kept with `problem_statement: null`.
+- **Launchpad fetcher skipped** (6 QEMU instances). Bugzilla is worth it (548).
+- **Fetchers were written together with the parsers** (same module) but not run on any
+  dataset before the yield above was committed; each was smoke-tested on two real refs.
+- **`Link:` is recorded, never fetched.** Even when it points at lore it is usually the
+  patch's own submission link.
+- **syzbot and bugzilla URLs are taken from any line of the message**, not only from
+  `Reported-by:`/`Closes:`: `syzkaller.appspot.com/bug?` and `bugzilla.kernel.org/show_bug.cgi`
+  can only be bug pages, so a `Link:` to them is a report. lore URLs are taken from
+  `Closes:` only.
+- **lore targets whose subject is a `[PATCH ...]`** are counted as a drop
+  (`lore_report: target is a patch`) instead of becoming the problem statement: a
+  `Closes:` pointing at a patch submission is not a report. Mail bodies drop `>`-quoted
+  lines and everything from a `-- ` signature marker; kernel test robot reports keep
+  their build logs.
+- **PostgreSQL archive: the flat thread page is the source.** `/message-id/raw/` and
+  `postgr.es/m/` redirect non-browser clients to the HTML view, so one request fetches
+  `/message-id/flat/<msgid>` and the messages are parsed from its HTML (subject,
+  message-id, `message-content` div). The message whose subject starts with `BUG #` wins,
+  else the thread's first message. The archive obfuscates addresses (`(at)`, `(dot)`);
+  that text is kept as is. `Bug: #N` alone is not fetchable (no number-to-message mapping)
+  and stays in `report_refs`.
+- **GitLab issue URLs are the QEMU report ref wherever they appear** (`Resolves:`,
+  `Fixes:`, `Closes:`, `Buglink:`, `Bug:`); GitLab's `web_url` (which now points at
+  `-/work_items/N`) is stored as `report_url`.
+- **Bugzilla private bugs** (HTTP 401) are cached as `null` like 404s.
+- **Raw text responses are decoded as UTF-8 with replacement** before caching; mail in
+  other charsets (rare on lore) may carry replacement characters.

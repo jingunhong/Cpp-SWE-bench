@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from cpp_swe_bench import extract, filters, gitutil, writers
+from cpp_swe_bench import extract, filters, gitutil, reports, writers
 from cpp_swe_bench.schema import Instance
 
 
@@ -14,7 +14,7 @@ def test_end_to_end(synthetic_repo, tmp_path: Path):
             "example/toy",
             since=None,
             references=filters.fixes_shas,
-            problem=extract.commit_message_problem,
+            refs={"link": reports.link_urls},
             funnel=funnel,
         )
     )
@@ -25,14 +25,15 @@ def test_end_to_end(synthetic_repo, tmp_path: Path):
         "has reference": 3,
         "has gold files": 2,
         "1-5 gold files": 1,
-        "has problem statement": 1,
     }
     [inst] = instances
     assert inst.instance_id == f"toy__{shas['fix'][:12]}"
     assert inst.base_commit == shas["initial"]
     assert inst.fix_commit == shas["fix"]
     assert inst.created_at == "2023-02-01T10:00:00+09:00"
-    assert inst.problem_statement == "foo: fix off-by-one\n\nfoo() returned the wrong value."
+    assert inst.commit_message == "foo: fix off-by-one\n\nfoo() returned the wrong value."
+    assert inst.problem_statement is None and inst.problem_source is None
+    assert inst.metadata["report_refs"] == {"link": ["https://example.com"]}
     assert inst.gold_files == ["drivers/foo.c", "drivers/foo.h"]
     assert inst.gold_functions is None
     assert inst.metadata["references"] == [shas["initial"][:12]]
@@ -41,7 +42,12 @@ def test_end_to_end(synthetic_repo, tmp_path: Path):
     assert "return 0" in inst.patch and "+int foo(void);" in inst.patch
     assert inst.validate() == []
 
-    assert inst.metadata["leakage"] == {"path": False, "basename": False, "function": False}
+    assert inst.metadata["leakage"] is None
+    assert inst.metadata["commit_message_leakage"] == {
+        "path": False,
+        "basename": False,
+        "function": False,
+    }
     [out] = writers.write_jsonl(tmp_path, instances)
     assert Instance.from_json(out.read_text().splitlines()[0]) == inst
     stats = tmp_path / "STATS.md"

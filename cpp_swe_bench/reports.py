@@ -1,0 +1,366 @@
+"""Report sources: link parsers and fetchers behind one on-disk cache.
+
+A source finds its references in a commit message (``refs``) and turns one reference into
+a report (``report`` -> ``(title, body, extra_metadata)`` or a drop reason). Raw responses
+are cached as JSON under ``<cache_dir>/<source>/`` (``null`` for 404), so a re-run with a
+warm cache is offline and deterministic. Fetching is stdlib ``urllib`` with retries and
+rate-limit sleeps; nothing here is called from the tests over the network.
+"""
+
+import email
+import email.policy
+import hashlib
+import html
+import http.client
+import json
+import re
+import time
+import urllib.error
+import urllib.parse
+import urllib.request
+from pathlib import Path
+
+from . import filters
+
+Report = tuple[str, str, dict]  # title, body, extra metadata (always carries report_url)
+_QUOTE_RE = re.compile(r"^\s*>")
+_PATCH_SUBJECT_RE = re.compile(r"^\s*(?:re:\s*)*\[[^\]]*\bpatch\b", re.IGNORECASE)
+
+
+def http_get(
+    url: str, headers: dict[str, str] | None = None, pace: float = 0.0, not_found=(404,)
+) -> bytes | None:
+    """GET ``url``; None for a ``not_found`` status. Retries transient errors and 5xx with
+    exponential backoff, sleeps through 403/429 rate limits (``*RateLimit-Reset`` epoch or
+    60 s), and pauses ``pace`` seconds after every successful request."""
+    req = urllib.request.Request(url, headers={"User-Agent": "cpp-swe-bench", **(headers or {})})
+    for attempt in range(8):
+        try:
+            with urllib.request.urlopen(req, timeout=60) as resp:
+                data = resp.read()
+                if (
+                    resp.headers.get(
+                        "X-RateLimit-Remaining", resp.headers.get("RateLimit-Remaining", "1")
+                    )
+                    == "0"
+                ):
+                    _sleep_until_reset(resp.headers)
+            time.sleep(pace)
+            return data
+        except urllib.error.HTTPError as e:
+            if e.code in not_found:
+                return None
+            if e.code in (403, 429):
+                _sleep_until_reset(e.headers)
+            elif e.code >= 500:
+                time.sleep(2**attempt)
+            else:
+                raise
+        except urllib.error.URLError, http.client.HTTPException, TimeoutError:
+            time.sleep(2**attempt)  # transient network error, retry with backoff
+    raise RuntimeError(f"giving up on {url} after 8 attempts")
+
+
+def _sleep_until_reset(headers) -> None:
+    reset = int(headers.get("X-RateLimit-Reset", headers.get("RateLimit-Reset", "0")))
+    time.sleep(max(reset - time.time(), 60))
+
+
+def clean_body(text: str) -> str:
+    """Mail body without quoted lines (``> ...``) and without the ``-- `` signature block;
+    runs of blank lines collapsed."""
+    kept = []
+    for line in text.splitlines():
+        if line.rstrip() == "--":
+            break
+        if not _QUOTE_RE.match(line):
+            kept.append(line.rstrip())
+    return re.sub(r"\n{3,}", "\n\n", "\n".join(kept)).strip()
+
+
+def html_to_text(fragment: str) -> str:
+    """``<br>`` and ``</p>`` become newlines, other tags are dropped, entities unescaped."""
+    text = re.sub(r"<br\s*/?>", "\n", fragment)
+    text = re.sub(r"</p>", "\n\n", text)
+    return html.unescape(re.sub(r"<[^>]+>", "", text))
+
+
+def _unique(items) -> list[str]:
+    return list(dict.fromkeys(items))
+
+
+class Source:
+    """Base: ``refs``/``fetch``/``parse`` per source; caching and drop reasons shared."""
+
+    name = ""
+    pace = 0.5  # seconds between requests; polite default for sites without a limit header
+    headers: dict[str, str] = {}
+    not_found = (404,)
+
+    def __init__(self, cache_dir: Path, subdir: str | None = None):
+        self.dir = cache_dir / (subdir or self.name)
+        self.dir.mkdir(parents=True, exist_ok=True)
+
+    def refs(self, message: str) -> list[str]:
+        raise NotImplementedError
+
+    def fetch(self, ref: str):
+        """Raw JSON-serialisable response for ``ref``, or None when it does not exist."""
+        raise NotImplementedError
+
+    def parse(self, ref: str, raw) -> Report | str:
+        """``(title, body, extra)`` from a cached raw response, or a drop reason."""
+        raise NotImplementedError
+
+    def get(self, ref: str):
+        """Raw response from the cache, fetching (and caching, ``null`` included) on a miss."""
+        key = urllib.parse.quote(ref, safe="")
+        if len(key) > 200:
+            key = hashlib.sha1(ref.encode()).hexdigest()
+        path = self.dir / f"{key}.json"
+        if path.exists():
+            return json.loads(path.read_text(encoding="utf-8"))
+        raw = self.fetch(ref)
+        path.write_text(json.dumps(raw), encoding="utf-8")
+        return raw
+
+    def report(self, ref: str) -> Report | str:
+        raw = self.get(ref)
+        return "not found" if raw is None else self.parse(ref, raw)
+
+    def _json(self, url: str):
+        data = http_get(url, self.headers, self.pace, self.not_found)
+        return None if data is None else json.loads(data)
+
+    def _text(self, url: str) -> str | None:
+        data = http_get(url, self.headers, self.pace, self.not_found)
+        return None if data is None else data.decode("utf-8", errors="replace")
+
+
+class GitHub(Source):
+    """``/repos/<upstream>/issues/<n>``; refs are issue numbers as strings. Without a token
+    GitHub allows 60 requests/hour, so unauthenticated runs pause a second per call."""
+
+    name = "github_issue"
+
+    def __init__(self, cache_dir: Path, upstream: str, token: str | None):
+        super().__init__(cache_dir, f"{self.name}/{upstream.replace('/', '__')}")
+        self.upstream = upstream
+        self.headers = {"Accept": "application/vnd.github+json"}
+        self.pace = 1.0
+        if token:
+            self.headers["Authorization"] = f"Bearer {token}"
+            self.pace = 0.0
+
+    def refs(self, message: str) -> list[str]:
+        return [str(n) for n in filters.issue_refs(message, self.upstream)]
+
+    def fetch(self, ref: str):
+        return self._json(f"https://api.github.com/repos/{self.upstream}/issues/{ref}")
+
+    def parse(self, ref: str, raw) -> Report | str:
+        if "pull_request" in raw:
+            return "reference is a pull request"
+        if not (raw.get("title") or "").strip():
+            return "issue has no title"
+        extra = {
+            "issue_number": int(ref),
+            "issue_url": raw["html_url"],
+            "report_url": raw["html_url"],
+        }
+        return raw["title"], raw.get("body") or "", extra
+
+
+class GitLab(Source):
+    """``https://gitlab.com/<project>/-/issues/N`` URLs anywhere in the message; public API,
+    no auth (500 requests/minute, ``RateLimit-*`` headers)."""
+
+    name = "gitlab_issue"
+    pace = 0.15
+
+    def __init__(self, cache_dir: Path, project: str):
+        super().__init__(cache_dir)
+        self.project = project
+
+    def refs(self, message: str) -> list[str]:
+        return gitlab_issue_refs(message, self.project)
+
+    def fetch(self, ref: str):
+        number = ref.rsplit("/", 1)[1]
+        project = urllib.parse.quote(self.project, safe="")
+        return self._json(f"https://gitlab.com/api/v4/projects/{project}/issues/{number}")
+
+    def parse(self, ref: str, raw) -> Report | str:
+        if not (raw.get("title") or "").strip():
+            return "issue has no title"
+        return raw["title"], raw.get("description") or "", {"report_url": raw.get("web_url", ref)}
+
+
+def gitlab_issue_refs(message: str, project: str) -> list[str]:
+    """``https://gitlab.com/<project>/-/issues/N`` URLs anywhere in the message, in order."""
+    pattern = rf"https://gitlab\.com/{re.escape(project)}/-/issues/\d+\b"
+    return _unique(re.findall(pattern, message))
+
+
+class Syzbot(Source):
+    """``syzbot+<hash>@syzkaller.appspotmail.com`` addresses and ``syzkaller.appspot.com/bug?``
+    URLs anywhere in the message. Report = bug title + first crash report text."""
+
+    name = "syzbot"
+    _REF_RE = re.compile(
+        r"syzbot\+([0-9a-f]+)@syzkaller\.appspotmail\.com|syzkaller\.appspot\.com/bug\?((?:extid|id)=[0-9a-f]+)"
+    )
+
+    def refs(self, message: str) -> list[str]:
+        return _unique(f"extid={m[1]}" if m[1] else m[2] for m in self._REF_RE.finditer(message))
+
+    def fetch(self, ref: str):
+        bug = self._json(f"https://syzkaller.appspot.com/bug?{ref}&json=1")
+        if bug is None:
+            return None
+        crashes = bug.get("crashes") or []
+        link = crashes[0].get("crash-report-link") if crashes else None
+        report = self._text("https://syzkaller.appspot.com" + link) if link else None
+        return {"bug": bug, "report": report}
+
+    def parse(self, ref: str, raw) -> Report | str:
+        title = (raw["bug"].get("title") or "").strip()
+        if not title:
+            return "empty report"
+        return (
+            title,
+            raw["report"] or "",
+            {"report_url": f"https://syzkaller.appspot.com/bug?{ref}"},
+        )
+
+
+class Lore(Source):
+    """``Closes: https://lore.kernel.org/...`` (or lkml.kernel.org) trailers; the raw message
+    at ``https://lore.kernel.org/all/<msgid>/raw``. Subject + body, quotes and signature
+    stripped. A target whose subject is a ``[PATCH ...]`` is a submission, not a report."""
+
+    name = "lore_report"
+    _REF_RE = re.compile(r"^Closes:\s*(https?://(?:lore|lkml)\.kernel\.org/\S+)", re.MULTILINE)
+    _MSGID_RE = re.compile(r"^https?://(?:lore|lkml)\.kernel\.org/[^/]+/([^/#\s]+)")
+
+    def refs(self, message: str) -> list[str]:
+        return _unique(m[1].rstrip(".:,;`'\"") for m in self._REF_RE.finditer(message))
+
+    def fetch(self, ref: str):
+        m = self._MSGID_RE.match(ref)
+        return self._text(f"https://lore.kernel.org/all/{m[1]}/raw") if m else None
+
+    def parse(self, ref: str, raw) -> Report | str:
+        msg = email.message_from_string(raw, policy=email.policy.default)
+        subject = " ".join(str(msg.get("Subject", "")).split())
+        if _PATCH_SUBJECT_RE.match(subject):
+            return "target is a patch"
+        part = msg.get_body(preferencelist=("plain",))
+        try:
+            body = part.get_content() if part else ""
+        except LookupError, UnicodeDecodeError, KeyError:
+            body = (part.get_payload(decode=True) or b"").decode("utf-8", errors="replace")
+        body = clean_body(body)
+        if not subject and not body:
+            return "empty report"
+        return subject, body, {"report_url": ref}
+
+
+class Bugzilla(Source):
+    """``bugzilla.kernel.org/show_bug.cgi?id=N`` URLs anywhere in the message (that host only
+    serves bug reports); REST ``/rest/bug/N`` summary + first comment."""
+
+    name = "kernel_bugzilla"
+    not_found = (401, 404)  # 401: private bug
+    _REF_RE = re.compile(r"https?://bugzilla\.kernel\.org/show_bug\.cgi\?id=(\d+)")
+
+    def refs(self, message: str) -> list[str]:
+        return _unique(m[0] for m in self._REF_RE.finditer(message))
+
+    def fetch(self, ref: str):
+        number = self._REF_RE.match(ref)[1]
+        data = self._json(f"https://bugzilla.kernel.org/rest/bug/{number}")
+        if not data or not data.get("bugs"):
+            return None
+        comments = self._json(f"https://bugzilla.kernel.org/rest/bug/{number}/comment") or {}
+        first = (comments.get("bugs", {}).get(number, {}).get("comments") or [None])[0]
+        return {"bug": data["bugs"][0], "comment": first}
+
+    def parse(self, ref: str, raw) -> Report | str:
+        title = (raw["bug"].get("summary") or "").strip()
+        if not title:
+            return "empty report"
+        body = (raw["comment"] or {}).get("text") or ""
+        return title, body, {"report_url": ref}
+
+
+class PgArchive(Source):
+    """``Discussion:`` archive URLs (postgr.es/m/<msgid> or postgresql.org/message-id/...).
+    Fetches the flat thread page, prefers the message whose subject starts with ``BUG #``,
+    else the thread's first message; body from the page's HTML, quotes and signature
+    stripped. The archive's raw-message view redirects to HTML for non-browser clients."""
+
+    name = "pgsql_archive"
+    _REF_RE = re.compile(
+        r"^Discussion:\s*(https?://(?:www\.)?(?:postgr\.es/m|postgresql\.org/message-id)/\S+)",
+        re.MULTILINE,
+    )
+    _MSGID_RE = re.compile(r"(?:/m/|/message-id/(?:flat/)?)([^/#\s]+)")
+    _MSG_RE = re.compile(
+        r'<th scope="row">Subject:</th>\s*<td>(.*?)</td>.*?'
+        r'<th scope="row">Message-ID:</th>\s*<td><a href="[^"]*">(.*?)</a>.*?'
+        r'<div class="message-content">(.*?)</div>',
+        re.DOTALL,
+    )
+
+    def refs(self, message: str) -> list[str]:
+        return _unique(m[1].rstrip(".:,;)") for m in self._REF_RE.finditer(message))
+
+    def fetch(self, ref: str):
+        m = self._MSGID_RE.search(ref)
+        if not m:
+            return None
+        msgid = urllib.parse.quote(urllib.parse.unquote(m[1]), safe="")
+        return self._text(f"https://www.postgresql.org/message-id/flat/{msgid}")
+
+    @classmethod
+    def messages(cls, page: str) -> list[tuple[str, str, str]]:
+        """``(subject, message_id, body_text)`` per message in thread order."""
+        return [
+            (html.unescape(s).strip(), html.unescape(i).strip(), html_to_text(b))
+            for s, i, b in cls._MSG_RE.findall(page)
+        ]
+
+    @classmethod
+    def pick(cls, messages: list[tuple[str, str, str]]) -> tuple[str, str, str] | None:
+        bugs = [m for m in messages if m[0].startswith("BUG #")]
+        return bugs[0] if bugs else (messages[0] if messages else None)
+
+    def parse(self, ref: str, raw) -> Report | str:
+        chosen = self.pick(self.messages(raw))
+        if chosen is None:
+            return "no message on page"
+        subject, msgid, body = chosen
+        body = clean_body(body)
+        if not subject and not body:
+            return "empty report"
+        url = "https://www.postgresql.org/message-id/" + urllib.parse.quote(msgid, safe="")
+        return subject, body, {"report_url": url}
+
+
+# Reference kinds recorded in ``metadata.report_refs`` without a fetcher.
+_LINK_RE = re.compile(r"^Link:\s*(\S+)", re.MULTILINE | re.IGNORECASE)
+_LAUNCHPAD_RE = re.compile(r"https?://bugs\.launchpad\.net/qemu/\+bug/\d+")
+_PG_BUG_RE = re.compile(r"^Bug:\s*#?(\d+)", re.MULTILINE)
+
+
+def link_urls(message: str) -> list[str]:
+    return _unique(m[1] for m in _LINK_RE.finditer(message))
+
+
+def launchpad_refs(message: str) -> list[str]:
+    return _unique(m[0] for m in _LAUNCHPAD_RE.finditer(message))
+
+
+def pgsql_bug_refs(message: str) -> list[str]:
+    return _unique(f"#{m[1]}" for m in _PG_BUG_RE.finditer(message))
