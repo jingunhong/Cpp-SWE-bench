@@ -129,8 +129,10 @@ def test_lore_parse_strips_quotes_and_rejects_patches(cache: Path):
         "Hi,\n\nOn Mon, X wrote:\n\nfoo crashes.\n\nMore.",
         {"report_url": "https://lore.kernel.org/r/a@b"},
     )
-    for subject in ("[PATCH v2 1/3] mm: fix", "Re: [RFC PATCH] x", "[PATCH net-next] y"):
+    for subject in ("[PATCH v2 1/3] mm: fix", "[RFC PATCH] x", "[PATCH net-next] y"):
         assert src.parse("u", f"Subject: {subject}\n\nbody\n") == "target is a patch"
+    reply = "Subject: Re: [PATCH v2] x\n\nthis breaks boot\n"
+    assert src.parse("u", reply)[0] == "Re: [PATCH v2] x"
     only_quotes = "Subject: [syzbot] KASAN: x\n\n> only quotes\n"
     assert src.parse("u", only_quotes) == ("[syzbot] KASAN: x", "", {"report_url": "u"})
 

@@ -175,9 +175,11 @@ Survey (git-side funnel only, instances = 1–5 gold files; issue repos since 20
   `Reported-by:`/`Closes:`: `syzkaller.appspot.com/bug?` and `bugzilla.kernel.org/show_bug.cgi`
   can only be bug pages, so a `Link:` to them is a report. lore URLs are taken from
   `Closes:` only.
-- **lore targets whose subject is a `[PATCH ...]`** are counted as a drop
+- **lore targets whose subject is a `[PATCH ...]` post** are counted as a drop
   (`lore_report: target is a patch`) instead of becoming the problem statement: a
-  `Closes:` pointing at a patch submission is not a report. Mail bodies drop `>`-quoted
+  `Closes:` pointing at a patch submission is not a report. `Re: [PATCH ...]` replies are
+  kept: in the first 1,164 cached lore targets 292 were such replies (a reviewer or bot
+  reporting a problem against a posted patch) versus 89 bare patch posts. Mail bodies drop `>`-quoted
   lines and everything from a `-- ` signature marker; kernel test robot reports keep
   their build logs.
 - **PostgreSQL archive: the flat thread page is the source.** `/message-id/raw/` and

@@ -24,7 +24,7 @@ from . import filters
 
 Report = tuple[str, str, dict]  # title, body, extra metadata (always carries report_url)
 _QUOTE_RE = re.compile(r"^\s*>")
-_PATCH_SUBJECT_RE = re.compile(r"^\s*(?:re:\s*)*\[[^\]]*\bpatch\b", re.IGNORECASE)
+_PATCH_SUBJECT_RE = re.compile(r"^\s*\[[^\]]*\bpatch\b", re.IGNORECASE)  # not "Re: [PATCH"
 
 
 def http_get(
@@ -240,7 +240,8 @@ class Syzbot(Source):
 class Lore(Source):
     """``Closes: https://lore.kernel.org/...`` (or lkml.kernel.org) trailers; the raw message
     at ``https://lore.kernel.org/all/<msgid>/raw``. Subject + body, quotes and signature
-    stripped. A target whose subject is a ``[PATCH ...]`` is a submission, not a report."""
+    stripped. A target whose subject is a ``[PATCH ...]`` post is a submission, not a report;
+    a ``Re: [PATCH ...]`` reply is kept (a reviewer's report against a patch)."""
 
     name = "lore_report"
     _REF_RE = re.compile(r"^Closes:\s*(https?://(?:lore|lkml)\.kernel\.org/\S+)", re.MULTILINE)
