@@ -1,3 +1,4 @@
+import base64
 import json
 from collections import Counter
 from pathlib import Path
@@ -117,8 +118,13 @@ def test_pg_thread_root_and_bug_selection(cache: Path):
     assert src.parse("ref", "<html></html>") == "no message on page"
 
 
+def _mail(raw: str | bytes) -> str:
+    """The lore cache entry: base64 of the raw message bytes."""
+    return base64.b64encode(raw if isinstance(raw, bytes) else raw.encode()).decode()
+
+
 def test_lore_parse_strips_quotes_and_rejects_patches(cache: Path):
-    raw = (
+    raw = _mail(
         "From: R <r@x>\nSubject: [bug report] foo: null deref\n  in bar()\n"
         "Content-Type: text/plain\n\n"
         "Hi,\n\nOn Mon, X wrote:\n> old\n> lines\n\nfoo crashes.\n\n\n\nMore.\n-- \nsig\n"
@@ -130,11 +136,37 @@ def test_lore_parse_strips_quotes_and_rejects_patches(cache: Path):
         {"report_url": "https://lore.kernel.org/r/a@b"},
     )
     for subject in ("[PATCH v2 1/3] mm: fix", "[RFC PATCH] x", "[PATCH net-next] y"):
-        assert src.parse("u", f"Subject: {subject}\n\nbody\n") == "target is a patch"
-    reply = "Subject: Re: [PATCH v2] x\n\nthis breaks boot\n"
+        assert src.parse("u", _mail(f"Subject: {subject}\n\nbody\n")) == "target is a patch"
+    reply = _mail("Subject: Re: [PATCH v2] x\n\nthis breaks boot\n")
     assert src.parse("u", reply)[0] == "Re: [PATCH v2] x"
-    only_quotes = "Subject: [syzbot] KASAN: x\n\n> only quotes\n"
+    only_quotes = _mail("Subject: [syzbot] KASAN: x\n\n> only quotes\n")
     assert src.parse("u", only_quotes) == ("[syzbot] KASAN: x", "", {"report_url": "u"})
+
+
+def test_lore_parse_resolves_charsets_and_transfer_encodings(cache: Path):
+    src = reports.Lore(cache)
+    latin1 = _mail(
+        b"Subject: =?iso-8859-1?q?Hellstr=F6m_report?=\n"
+        b"Content-Type: text/plain; charset=iso-8859-1\nContent-Transfer-Encoding: 8bit\n\n"
+        b"Thomas Hellstr\xf6m saw it.\n"
+    )
+    assert src.parse("u", latin1)[:2] == ("Hellström report", "Thomas Hellström saw it.")
+    qp = _mail(
+        b"Subject: qp\nContent-Type: text/plain; charset=utf-8\n"
+        b"Content-Transfer-Encoding: quoted-printable\n\n=D0=B3=D0=B4=D0=B5 crash =3D bad\n"
+    )
+    assert src.parse("u", qp)[1] == "где crash = bad"
+    assert src.stats == {}
+    undeclared = _mail(b"Subject: raw\n\nna\xc3\xafve 8-bit without a charset\n")
+    assert src.parse("u", undeclared)[1] == "naïve 8-bit without a charset"
+    assert src.stats == {"charset fallback": 1}
+    assert "\\u" not in src.parse("u", qp)[1] and "\ufffd" not in src.parse("u", latin1)[1]
+
+
+def test_clean_body_signature_marker_is_dash_dash_space():
+    log = "WARNING at x\n--\n[ 1.0] still the log\n-- \nsig line\n"
+    assert reports.clean_body(log) == "WARNING at x\n--\n[ 1.0] still the log"
+    assert reports.clean_body("a\n--\nb\n") == "a\n--\nb"
 
 
 def test_syzbot_bugzilla_gitlab_github_parse(cache: Path):

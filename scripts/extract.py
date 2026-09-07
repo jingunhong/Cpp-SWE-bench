@@ -124,6 +124,9 @@ def main() -> None:
             "instances with at least one report ref, per kind": dict(ref_counts),
             "reports by source": by_source,
             "report drops": dict(drops) if not args.no_reports else "skipped (--no-reports)",
+            "report counters (not drops)": {
+                f"{s.name}: {k}": v for s in sources for k, v in s.stats.items()
+            },
             "problem statement names a gold path / basename / patched function": _leak_summary(
                 instances, "leakage"
             ),

@@ -7,6 +7,7 @@ warm cache is offline and deterministic. Fetching is stdlib ``urllib`` with retr
 rate-limit sleeps; nothing here is called from the tests over the network.
 """
 
+import base64
 import email
 import email.policy
 import hashlib
@@ -18,6 +19,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+from collections import Counter
 from pathlib import Path
 
 from . import filters
@@ -73,7 +75,7 @@ def clean_body(text: str) -> str:
     runs of blank lines collapsed."""
     kept = []
     for line in text.splitlines():
-        if line.rstrip() == "--":
+        if line == "-- ":  # the signature marker is dash-dash-space; a bare "--" is log text
             break
         if not _QUOTE_RE.match(line):
             kept.append(line.rstrip())
@@ -102,6 +104,7 @@ class Source:
     def __init__(self, cache_dir: Path, subdir: str | None = None):
         self.dir = cache_dir / (subdir or self.name)
         self.dir.mkdir(parents=True, exist_ok=True)
+        self.stats: Counter[str] = Counter()  # informational counters that are not drops
 
     def refs(self, message: str) -> list[str]:
         raise NotImplementedError
@@ -239,9 +242,11 @@ class Syzbot(Source):
 
 class Lore(Source):
     """``Closes: https://lore.kernel.org/...`` (or lkml.kernel.org) trailers; the raw message
-    at ``https://lore.kernel.org/all/<msgid>/raw``. Subject + body, quotes and signature
-    stripped. A target whose subject is a ``[PATCH ...]`` post is a submission, not a report;
-    a ``Re: [PATCH ...]`` reply is kept (a reviewer's report against a patch)."""
+    at ``https://lore.kernel.org/all/<msgid>/raw``, cached as base64 of the raw bytes so the
+    email library resolves charset and transfer encoding. Subject + body, quotes and
+    signature stripped. A target whose subject is a ``[PATCH ...]`` post is a submission,
+    not a report; a ``Re: [PATCH ...]`` reply is kept (a reviewer's report against a
+    patch)."""
 
     name = "lore_report"
     _REF_RE = re.compile(r"^Closes:\s*(https?://(?:lore|lkml)\.kernel\.org/\S+)", re.MULTILINE)
@@ -252,17 +257,23 @@ class Lore(Source):
 
     def fetch(self, ref: str):
         m = self._MSGID_RE.match(ref)
-        return self._text(f"https://lore.kernel.org/all/{m[1]}/raw") if m else None
+        if not m:
+            return None
+        data = http_get(
+            f"https://lore.kernel.org/all/{m[1]}/raw", self.headers, self.pace, self.not_found
+        )
+        return None if data is None else base64.b64encode(data).decode("ascii")
 
     def parse(self, ref: str, raw) -> Report | str:
-        msg = email.message_from_string(raw, policy=email.policy.default)
+        msg = email.message_from_bytes(base64.b64decode(raw), policy=email.policy.default)
         subject = " ".join(str(msg.get("Subject", "")).split())
         if _PATCH_SUBJECT_RE.match(subject):
             return "target is a patch"
         part = msg.get_body(preferencelist=("plain",))
-        try:
-            body = part.get_content() if part else ""
+        try:  # strict: an undeclared charset with 8-bit text must reach the fallback
+            body = part.get_content(errors="strict") if part else ""
         except LookupError, UnicodeDecodeError, KeyError:
+            self.stats["charset fallback"] += 1
             body = (part.get_payload(decode=True) or b"").decode("utf-8", errors="replace")
         body = clean_body(body)
         if not subject and not body:

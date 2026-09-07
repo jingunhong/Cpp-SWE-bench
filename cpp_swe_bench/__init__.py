@@ -1,3 +1,3 @@
 """Extraction library for Cpp-SWE-bench: git mining, filters, schema, writers."""
 
-EXTRACTOR_VERSION = "0.2.0"
+EXTRACTOR_VERSION = "0.2.1"
