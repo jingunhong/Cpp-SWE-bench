@@ -209,6 +209,7 @@ class Syzbot(Source):
     URLs anywhere in the message. Report = bug title + first crash report text."""
 
     name = "syzbot"
+    pace = 3.0  # the dashboard throttles an IP at ~20 requests/minute (429, no headers)
     _REF_RE = re.compile(
         r"syzbot\+([0-9a-f]+)@syzkaller\.appspotmail\.com|syzkaller\.appspot\.com/bug\?((?:extid|id)=[0-9a-f]+)"
     )
