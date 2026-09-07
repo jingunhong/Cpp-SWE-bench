@@ -27,8 +27,12 @@ Design goals:
 | `data/llvm/v1/` | `llvm/llvm-project` | GitHub issue title + body | commits since 2024-01-01 | 8,357 | v0 rules, full range, two shards, `metadata.leakage` |
 | `data/systemd/v0/` | `systemd/systemd` | GitHub issue title + body | commits since 2022-01-01 | 1,418 | candidates reference a systemd issue |
 | `data/clickhouse/v0/` | `ClickHouse/ClickHouse` | GitHub issue title + body | commits since 2022-01-01 | 1,022 | candidates reference a ClickHouse issue |
+| `data/qemu/v2/` | `qemu/qemu` | GitLab issue (677) or `null` | commits since 2022-01-01 | 2,821 | v2 schema; GitLab issue URLs are a candidate signal too |
+| `data/llvm/v2/` | `llvm/llvm-project` | GitHub issue (8,357) or `null` | commits since 2024-01-01 | 8,504 | v2 schema, v1 range and cache, two shards |
+| `data/systemd/v2/` | `systemd/systemd` | GitHub issue (1,418) or `null` | commits since 2022-01-01 | 1,424 | v2 schema, v0 range and cache |
+| `data/clickhouse/v2/` | `ClickHouse/ClickHouse` | GitHub issue (1,022) or `null` | commits since 2022-01-01 | 1,049 | v2 schema, v0 range and cache |
 
-Each directory holds `instances.jsonl` (or `instances-000.jsonl`, `instances-001.jsonl`, … when one file would exceed 45 MB; read them with a glob), `STATS.md` (the filter funnel with counts) and `COMMAND.txt` (exact command line, extractor commit, upstream HEAD). Per-repository notes and a leakage probe live in `docs/extraction-<repo>.md`; every judgment call is logged in `docs/decisions.md`.
+v2 directories (schema below) hold the original report in `problem_statement` and the commit message in `commit_message`; the count in parentheses is the number of instances with a report, the rest carry `null`. Each directory holds `instances.jsonl` (or `instances-000.jsonl`, `instances-001.jsonl`, … when one file would exceed 45 MB; read them with a glob), `STATS.md` (the filter funnel with counts) and `COMMAND.txt` (exact command line, extractor commit, upstream HEAD). Per-repository notes and a leakage probe live in `docs/extraction-<repo>.md`; every judgment call is logged in `docs/decisions.md`.
 
 ## Instance schema
 
@@ -68,20 +72,36 @@ Applied in this order; `STATS.md` reports survivors of each stage.
 
 1. not a merge commit
 2. not a revert (`Revert "..."` subject or `This reverts commit` body)
-3. has a reference (`Fixes: <sha>` trailer for Linux and QEMU; `Reported-by:` or `Bug: #N` trailer for PostgreSQL; `Fixes/Closes/Resolves #N` or the issue URL for GitHub-issue repositories)
+3. has a reference (`Fixes: <sha>` trailer for Linux; `Fixes: <sha>` or a `gitlab.com/qemu-project/qemu/-/issues/N` URL for QEMU; `Reported-by:` or `Bug: #N` trailer for PostgreSQL; `Fixes/Closes/Resolves #N` or the issue URL for GitHub-issue repositories)
 4. at least one gold file: changed path with a C/C++ extension (`.c .h .cc .cpp .cxx .hh .hpp .hxx`) that is not a test path (`test/`, `tests/`, `testing/`, `selftests/`, `unittest(s)/` directories, or a `test` token in the file name)
 5. between 1 and 5 gold files
-6. a non-empty problem statement (for issue-backed repositories: the first referenced number that is a real issue, not a pull request or a deleted issue)
+
+Having a report is not a filter (v2): every survivor is written, with `problem_statement: null` when no report resolves. `STATS.md` reports, per source, how many instances carry a report ref, how many resolved, and every failed ref under `report drops`.
+
+## Report sources (v2)
+
+Reports are fetched after the git filters, in the order listed; the first ref that resolves to a real report wins. Raw responses are cached under `repos/cache/<source>/` (404 as `null`), so a re-run with a warm cache is offline.
+
+| Repository | `problem_source` | Ref in the commit message | Fetched from |
+|---|---|---|---|
+| Linux | `syzbot` | `syzbot+<hash>@syzkaller.appspotmail.com`, `syzkaller.appspot.com/bug?extid=…` | `bug?extid=<hash>&json=1`: bug title + first crash report text |
+| Linux | `lore_report` | `Closes: https://lore.kernel.org/…` (or lkml.kernel.org) | `lore.kernel.org/all/<msgid>/raw`: subject + body, quotes and signature stripped; `[PATCH …]` targets are dropped |
+| Linux | `kernel_bugzilla` | `bugzilla.kernel.org/show_bug.cgi?id=N` | REST `/rest/bug/N` summary + first comment |
+| QEMU | `gitlab_issue` | `gitlab.com/qemu-project/qemu/-/issues/N` (any trailer) | GitLab API v4, no auth: title + description |
+| PostgreSQL | `pgsql_archive` | `Discussion:` URL (`postgr.es/m/<msgid>`, `postgresql.org/message-id/…`) | `/message-id/flat/<msgid>`: the thread's `BUG #` message, else its first message; subject + body, quotes and signature stripped |
+| LLVM, systemd, ClickHouse | `github_issue` | `Fixes/Closes/Resolves #N`, issue URL, `owner/repo#N` | GitHub REST: title + body (pull requests and deleted issues are drops) |
+
+`Link:` is never a report source (it is usually the patch's own submission link); it is recorded in `metadata.report_refs.link` only, as are QEMU Launchpad URLs (`launchpad`) and PostgreSQL bug numbers (`pgsql_bug`).
 
 ## Repository layout
 
 ```
-cpp_swe_bench/      extraction library: gitutil, filters, schema, writers, extract, github
+cpp_swe_bench/      extraction library: gitutil, filters, schema, writers, extract, reports
 scripts/            extract.py, validate.py, leakage.py
 data/<repo>/<ver>/  instances.jsonl + STATS.md + COMMAND.txt
 tests/              unit tests on synthetic git repos created in tmp_path; no network
 docs/               decisions.md and per-repository extraction notes
-repos/              local upstream clones and the GitHub API cache (git-ignored)
+repos/              local upstream clones and the report caches (git-ignored)
 ```
 
 ## Setup
@@ -108,14 +128,18 @@ Do not run status-style git commands (or leave an editor/shell) inside a `--no-c
 ## Regenerating a dataset
 
 ```bash
-uv run python scripts/extract.py --repo linux --since 2022-01-01 --out data/linux/v1/
-GITHUB_TOKEN=... uv run python scripts/extract.py --repo llvm --since 2024-01-01 --out data/llvm/v1/
-uv run python scripts/validate.py data/linux/v1/instances*.jsonl
-uv run python scripts/leakage.py data/linux/v1/instances*.jsonl          # whole set
-uv run python scripts/leakage.py data/linux/v0/instances.jsonl --n 20    # sampled table
+uv run python scripts/extract.py --repo linux --since 2022-01-01 --out data/linux/v2/
+uv run python scripts/extract.py --repo qemu --since 2022-01-01 --out data/qemu/v2/
+uv run python scripts/extract.py --repo postgres --since 2022-01-01 --out data/postgres/v2/
+GITHUB_TOKEN=... uv run python scripts/extract.py --repo llvm --since 2024-01-01 --out data/llvm/v2/
+GITHUB_TOKEN=... uv run python scripts/extract.py --repo systemd --since 2022-01-01 --out data/systemd/v2/
+GITHUB_TOKEN=... uv run python scripts/extract.py --repo clickhouse --since 2022-01-01 --out data/clickhouse/v2/
+uv run python scripts/validate.py data/linux/v2/instances*.jsonl
+uv run python scripts/leakage.py data/linux/v2/instances*.jsonl          # whole set, both texts
+uv run python scripts/leakage.py data/linux/v2/instances-000.jsonl --n 20    # sampled table
 ```
 
-`--since` is passed to `git log` (committer date). Issue-backed repositories read `GITHUB_TOKEN` if set (5,000 requests/hour) and otherwise run unauthenticated at 60 requests/hour; responses are cached under `repos/cache/` so re-runs are offline. `--no-patch` skips patch generation for a quick funnel count.
+`--since` is passed to `git log` (committer date). Issue-backed repositories read `GITHUB_TOKEN` if set (5,000 requests/hour) and otherwise run unauthenticated at 60 requests/hour; the other sources need no credentials and are paced politely. Responses are cached under `repos/cache/<source>/` so re-runs are offline. `--no-patch` skips patch generation and `--no-reports` skips report fetching, for a quick funnel and yield count.
 
 ## Non-goals
 

@@ -1,4 +1,4 @@
-# LLVM extraction (v0, v1)
+# LLVM extraction (v0, v1, v2)
 
 Upstream: `llvm/llvm-project`, blob-less clone at `repos/llvm`. Candidates are non-merge,
 non-revert commits whose message references an issue of `llvm/llvm-project` with
@@ -57,3 +57,25 @@ libc 374, clang-tools-extra 356, libcxx 274, lldb 160. Median problem statement 
 Issue reports leak less than kernel commit messages at the function level but more at the
 file level: crash reports and reproducers often quote a basename from an assertion message
 or a stack trace (`SemaExpr.cpp:1234`). Nothing is scrubbed in v0.
+
+## v2: schema only
+
+`data/llvm/v2/` re-runs the v1 range over the same clone, HEAD and API cache (offline)
+with the v2 schema: `commit_message` (trailers stripped) is a separate field,
+`metadata.commit_message_leakage` is computed against it, and commits whose references
+are all pull requests or deleted issues are **kept** with `problem_statement: null`
+instead of being dropped at a `has problem statement` stage.
+
+### Reports
+
+| | Instances |
+|---|---:|
+| with a GitHub issue ref | 8,504 (100%) |
+| resolved to an issue (`github_issue`) | 8,357 |
+| with `problem_statement: null` | 147 (1.7%; 149 refs were pull requests, 1 a deleted issue) |
+
+Leakage: `problem_statement` (8,357 instances) path 14.8%, basename 23.2%, patched function 19.0%, unchanged from v1;
+`commit_message` (8,504) path 1.2%, basename 3.6%, function 18.2%.
+
+All 8,504 validate; two shards, 45.0 MB + 24.1 MB. Same cache as v1, moved to
+`repos/cache/github_issue/<owner__repo>/`.
