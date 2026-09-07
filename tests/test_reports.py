@@ -194,3 +194,21 @@ def test_cache_and_add_reports(cache: Path):
     assert none.problem_statement is None
     assert drops == {"syzbot: not found": 2}
     assert all(i.validate() == [] for i in (hit, miss, none))
+
+
+def test_http_get_treats_login_redirect_as_not_found(monkeypatch):
+    class Resp:
+        url = "https://accounts.google.com/v3/signin/identifier?continue=x"
+        headers = {}
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            pass
+
+        def read(self):
+            raise AssertionError("must not read a sign-in page")
+
+    monkeypatch.setattr(reports.urllib.request, "urlopen", lambda req, timeout: Resp())
+    assert reports.http_get("https://syzkaller.appspot.com/bug?extid=x&json=1") is None

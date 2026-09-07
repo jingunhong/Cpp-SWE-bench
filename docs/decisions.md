@@ -193,3 +193,10 @@ Survey (git-side funnel only, instances = 1–5 gold files; issue repos since 20
 - **Bugzilla private bugs** (HTTP 401) are cached as `null` like 404s.
 - **Raw text responses are decoded as UTF-8 with replacement** before caching; mail in
   other charsets (rare on lore) may carry replacement characters.
+- **syzbot bugs behind a login** (some namespaces redirect `bug?extid=` to a Google sign-in
+  page instead of returning JSON) are cached as `null` and counted as
+  `syzbot: not found`. The first Linux v2 run lost its syzbot thread to this after 104
+  bugs; the cache made the restart free.
+- **Report caches are warmed one thread per source** (`extract.warm_caches`) before the
+  sequential resolution, so the three Linux hosts are fetched concurrently; this fetches a
+  few refs the resolution order would have skipped, which only fills the cache.

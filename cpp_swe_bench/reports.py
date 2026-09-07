@@ -37,6 +37,8 @@ def http_get(
     for attempt in range(8):
         try:
             with urllib.request.urlopen(req, timeout=60) as resp:
+                if urllib.parse.urlsplit(resp.url).netloc == "accounts.google.com":
+                    return None  # login-only page (syzkaller private namespace): not found
                 data = resp.read()
                 if (
                     resp.headers.get(
