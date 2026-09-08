@@ -17,12 +17,16 @@
 - **instances with at least one report ref, per kind**: {'pgsql_archive': 1329, 'pgsql_bug': 135}
 - **reports by source**: {'pgsql_archive': 1318}
 - **report drops**: {'pgsql_archive: not found': 11}
-- **problem statement names a gold path / basename / patched function**: over 1318 instances: path: 177 (13.4%), basename: 358 (27.2%), function: 334 (25.3%)
+- **report counters (not drops)**: {}
+- **report kind (lore_report only)**: {}
+- **report pick (pgsql_archive only)**: {'linked_message': 1038, 'bug_subject': 210, 'committers_reply': 70}
+- **reports shorter than 300 characters, per source**: {'pgsql_archive': 48}
+- **problem statement names a gold path / basename / patched function**: over 1318 instances: path: 180 (13.7%), basename: 432 (32.8%), function: 480 (36.4%)
 - **commit message names a gold path / basename / patched function**: over 1333 instances: path: 2 (0.2%), basename: 117 (8.8%), function: 483 (36.2%)
 - **upstream**: postgres/postgres
 - **upstream HEAD**: 798bdcae89debabc59fa8afc6d690fec584db32f
 - **since**: 2022-01-01
-- **extractor commit**: 8b10cebf08ddb952f23790fa0a12b3fad17dfb0f
-- **extractor version**: 0.2.0
+- **extractor commit**: 3dc0c6517b890e59a174565c31e5cdacb563c2c7
+- **extractor version**: 0.2.1
 - **report sources (resolution order)**: pgsql_archive
-- **github token**: GITHUB_TOKEN
+- **github token**: none

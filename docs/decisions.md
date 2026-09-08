@@ -240,3 +240,15 @@ Survey (git-side funnel only, instances = 1–5 gold files; issue repos since 20
   SHA that actually ran (the v2 runs recorded the previous commit). Each fix is therefore
   two commits: code + tests, then data + docs.
 - **v2 is overwritten in place** (never released; no v3); v0 and v1 untouched.
+- **PostgreSQL picks the linked message, not the thread root.** A review of the first v2
+  run found the root differing from the committer's `Discussion:` link in 1,109 of 1,318
+  instances, with 70 roots being `pgsql:` commit notifications (a previous fix's message,
+  exactly what v2 exists to exclude). New rule: first `BUG #` message; else first reply to
+  a `pgsql:` root; else the linked message itself. The linked message-id matched a page
+  message in all 1,221 cached threads, so `linked message not in thread` is a drop reason
+  that never fired. The choice is recorded per instance (`report_pick`,
+  `report_thread_root_subject`, `report_thread_position`). Function leakage rose from
+  25.3% to 36.4% as a consequence; reported, not filtered.
+- **Fix 2 and Fix 3 code share one commit.** Fix 3's `report_kind: null` for non-lore
+  sources touches every regenerated dataset, so committing it before the PostgreSQL run
+  avoided a second PostgreSQL regeneration; the data commits stay separate.
