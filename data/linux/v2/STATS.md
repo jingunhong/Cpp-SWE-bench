@@ -14,6 +14,7 @@
 - **instances written**: 63115
 - **files**: instances-000.jsonl, instances-001.jsonl, instances-002.jsonl, instances-003.jsonl, instances-004.jsonl
 - **with a report / without**: 5424 / 57691
+- **dataset.jsonl rows (with a report, without patch)**: 5424
 - **instances with at least one report ref, per kind**: {'link': 42561, 'lore_report': 3853, 'syzbot': 1812, 'kernel_bugzilla': 548}
 - **reports by source**: {'syzbot': 1809, 'lore_report': 3087, 'kernel_bugzilla': 528}
 - **report drops**: {'lore_report: target is a patch': 230, 'lore_report: not found': 124, 'syzbot: not found': 4}
@@ -26,7 +27,7 @@
 - **upstream**: torvalds/linux
 - **upstream HEAD**: 654ae5d73c05bd2943d65636ce6cd0aa46e62f18
 - **since**: 2022-01-01
-- **extractor commit**: 3dc0c6517b890e59a174565c31e5cdacb563c2c7
-- **extractor version**: 0.2.1
+- **extractor commit**: 7c02155cd52755aba95f521ee0b1b57cacc15458
+- **extractor version**: 0.3.0
 - **report sources (resolution order)**: syzbot, lore_report, kernel_bugzilla
 - **github token**: none

@@ -14,15 +14,20 @@
 - **instances written**: 1424
 - **files**: instances.jsonl
 - **with a report / without**: 1418 / 6
+- **dataset.jsonl rows (with a report, without patch)**: 1418
 - **instances with at least one report ref, per kind**: {'github_issue': 1424}
 - **reports by source**: {'github_issue': 1418}
 - **report drops**: {'github_issue: reference is a pull request': 7}
+- **report counters (not drops)**: {}
+- **report kind (lore_report only)**: {}
+- **report pick (pgsql_archive only)**: {}
+- **reports shorter than 300 characters, per source**: {'github_issue': 28}
 - **problem statement names a gold path / basename / patched function**: over 1418 instances: path: 282 (19.9%), basename: 314 (22.1%), function: 225 (15.9%)
 - **commit message names a gold path / basename / patched function**: over 1424 instances: path: 14 (1.0%), basename: 24 (1.7%), function: 180 (12.6%)
 - **upstream**: systemd/systemd
 - **upstream HEAD**: 726e17a933296e7107f862c6ebe175a3d176e6bb
 - **since**: 2022-01-01
-- **extractor commit**: 8b10cebf08ddb952f23790fa0a12b3fad17dfb0f
-- **extractor version**: 0.2.0
+- **extractor commit**: 7c02155cd52755aba95f521ee0b1b57cacc15458
+- **extractor version**: 0.3.0
 - **report sources (resolution order)**: github_issue
-- **github token**: GITHUB_TOKEN
+- **github token**: none

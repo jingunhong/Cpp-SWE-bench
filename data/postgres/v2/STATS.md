@@ -14,6 +14,7 @@
 - **instances written**: 1333
 - **files**: instances.jsonl
 - **with a report / without**: 1318 / 15
+- **dataset.jsonl rows (with a report, without patch)**: 1318
 - **instances with at least one report ref, per kind**: {'pgsql_archive': 1329, 'pgsql_bug': 135}
 - **reports by source**: {'pgsql_archive': 1318}
 - **report drops**: {'pgsql_archive: not found': 11}
@@ -26,7 +27,7 @@
 - **upstream**: postgres/postgres
 - **upstream HEAD**: 798bdcae89debabc59fa8afc6d690fec584db32f
 - **since**: 2022-01-01
-- **extractor commit**: 3dc0c6517b890e59a174565c31e5cdacb563c2c7
-- **extractor version**: 0.2.1
+- **extractor commit**: 7c02155cd52755aba95f521ee0b1b57cacc15458
+- **extractor version**: 0.3.0
 - **report sources (resolution order)**: pgsql_archive
 - **github token**: none
