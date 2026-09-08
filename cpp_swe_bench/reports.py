@@ -278,7 +278,21 @@ class Lore(Source):
         body = clean_body(body)
         if not subject and not body:
             return "empty report"
-        return subject, body, {"report_url": ref}
+        return subject, body, {"report_url": ref, "report_kind": self.kind(ref, msg, subject, body)}
+
+    @staticmethod
+    def kind(ref: str, msg, subject: str, body: str) -> str:
+        """``robot`` (kernel test robot / lkp by sender, list or body), ``reply`` (a
+        ``Re: [...]`` reply to a posted patch) or ``fresh``."""
+        sender = str(msg.get("From", ""))
+        if (
+            "lkp@intel.com" in sender
+            or "/oe-kbuild-all/" in ref
+            or "/oe-lkp/" in ref
+            or "kernel test robot" in f"{sender}\n{body}".lower()
+        ):
+            return "robot"
+        return "reply" if re.match(r"^Re:\s*\[", subject) else "fresh"
 
 
 class Bugzilla(Source):
@@ -311,9 +325,10 @@ class Bugzilla(Source):
 
 class PgArchive(Source):
     """``Discussion:`` archive URLs (postgr.es/m/<msgid> or postgresql.org/message-id/...).
-    Fetches the flat thread page, prefers the message whose subject starts with ``BUG #``,
-    else the thread's first message; body from the page's HTML, quotes and signature
-    stripped. The archive's raw-message view redirects to HTML for non-browser clients."""
+    Fetches the flat thread page and picks (see :meth:`pick`) the first ``BUG #`` message,
+    else the first reply to a ``pgsql:`` commit notification, else the linked message
+    itself; body from the page's HTML, quotes and signature stripped. The archive's
+    raw-message view redirects to HTML for non-browser clients."""
 
     name = "pgsql_archive"
     _REF_RE = re.compile(
@@ -347,20 +362,43 @@ class PgArchive(Source):
         ]
 
     @classmethod
-    def pick(cls, messages: list[tuple[str, str, str]]) -> tuple[str, str, str] | None:
-        bugs = [m for m in messages if m[0].startswith("BUG #")]
-        return bugs[0] if bugs else (messages[0] if messages else None)
+    def pick(cls, messages: list[tuple[str, str, str]], linked: str) -> tuple[int, str] | str:
+        """``(index, how)`` of the report in the flat thread, or a drop reason. ``how`` is
+        ``bug_subject`` (first ``BUG #`` message), ``committers_reply`` (the thread root is
+        a ``pgsql:`` commit notification: its first reply) or ``linked_message`` (the
+        message the ``Discussion:`` URL points at, ``linked`` = its message-id)."""
+        if not messages:
+            return "no message on page"
+        for i, (subject, _, _) in enumerate(messages):
+            if subject.startswith("BUG #"):
+                return i, "bug_subject"
+        if messages[0][0].startswith("pgsql:"):
+            if len(messages) == 1:
+                return "committers thread without reply"
+            return 1, "committers_reply"
+        for i, (_, msgid, _) in enumerate(messages):
+            if msgid == linked:
+                return i, "linked_message"
+        return "linked message not in thread"
 
     def parse(self, ref: str, raw) -> Report | str:
-        chosen = self.pick(self.messages(raw))
-        if chosen is None:
-            return "no message on page"
-        subject, msgid, body = chosen
+        messages = self.messages(raw)
+        picked = self.pick(messages, urllib.parse.unquote(self._MSGID_RE.search(ref)[1]))
+        if isinstance(picked, str):
+            return picked
+        index, how = picked
+        subject, msgid, body = messages[index]
         body = clean_body(body)
         if not subject and not body:
             return "empty report"
         url = "https://www.postgresql.org/message-id/" + urllib.parse.quote(msgid, safe="")
-        return subject, body, {"report_url": url}
+        extra = {
+            "report_url": url,
+            "report_pick": how,
+            "report_thread_root_subject": messages[0][0],
+            "report_thread_position": index,
+        }
+        return subject, body, extra
 
 
 # Reference kinds recorded in ``metadata.report_refs`` without a fetcher.

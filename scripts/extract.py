@@ -70,6 +70,10 @@ def _leak_summary(instances, key: str) -> str:
     return f"over {n} instances: {cells}"
 
 
+def _count_key(instances, key: str) -> dict[str, int]:
+    return dict(Counter(i.metadata[key] for i in instances if i.metadata.get(key)))
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--repo", required=True, choices=sorted(REPOS))
@@ -127,6 +131,15 @@ def main() -> None:
             "report counters (not drops)": {
                 f"{s.name}: {k}": v for s in sources for k, v in s.stats.items()
             },
+            "report kind (lore_report only)": _count_key(instances, "report_kind"),
+            "report pick (pgsql_archive only)": _count_key(instances, "report_pick"),
+            "reports shorter than 300 characters, per source": dict(
+                Counter(
+                    i.problem_source
+                    for i in instances
+                    if i.problem_source and len(i.problem_statement) < 300
+                )
+            ),
             "problem statement names a gold path / basename / patched function": _leak_summary(
                 instances, "leakage"
             ),

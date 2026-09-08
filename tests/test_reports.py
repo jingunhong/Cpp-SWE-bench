@@ -93,7 +93,7 @@ def _pg_message(subject: str, msgid: str, body_html: str) -> str:
     )
 
 
-def test_pg_thread_root_and_bug_selection(cache: Path):
+def test_pg_pick_bug_subject_committers_reply_linked_message(cache: Path):
     bug_body = (
         "<p>The following bug has been logged:</p><p>&gt; quoted<br>step 1<br>step &amp; 2</p>"
     )
@@ -105,17 +105,45 @@ def test_pg_thread_root_and_bug_selection(cache: Path):
     src = reports.PgArchive(cache)
     msgs = src.messages(page)
     assert [m[0] for m in msgs] == ["Patch v1", "BUG #19441: hang", "Re: BUG #19441: hang"]
-    assert src.pick(msgs)[1] == "19441-x@postgresql.org"
-    assert src.parse("ref", page) == (
+    assert src.pick(msgs, "b@x") == (1, "bug_subject")  # BUG # wins over the linked message
+    assert src.parse("https://postgr.es/m/b@x", page) == (
         "BUG #19441: hang",
         "The following bug has been logged:\n\nstep 1\nstep & 2",
-        {"report_url": "https://www.postgresql.org/message-id/19441-x%40postgresql.org"},
+        {
+            "report_url": "https://www.postgresql.org/message-id/19441-x%40postgresql.org",
+            "report_pick": "bug_subject",
+            "report_thread_root_subject": "Patch v1",
+            "report_thread_position": 1,
+        },
     )
-    root = _pg_message("Planner crash", "root@x", "<p>root</p>")
-    assert src.parse("ref", root + _pg_message("Re: Planner crash", "r@x", "<p>re</p>"))[0] == (
-        "Planner crash"
+    # a pgsql-committers notification as root: its first reply is the report
+    commit = _pg_message("pgsql: Fix planner", "E1@gemulon.postgresql.org", "<p>Fix planner</p>")
+    reply = _pg_message("Re: pgsql: Fix planner", "r@x", "<p>this broke my query</p>")
+    got = src.parse("https://postgr.es/m/E1%40gemulon.postgresql.org", commit + reply)
+    assert got[0] == "Re: pgsql: Fix planner"
+    assert got[2] == {
+        "report_url": "https://www.postgresql.org/message-id/r%40x",
+        "report_pick": "committers_reply",
+        "report_thread_root_subject": "pgsql: Fix planner",
+        "report_thread_position": 1,
+    }
+    no_reply = src.parse("https://postgr.es/m/E1%40gemulon.postgresql.org", commit)
+    assert no_reply == "committers thread without reply"
+    # otherwise the linked message itself, not the thread root
+    thread = (
+        _pg_message("Planner crash", "root@x", "<p>root</p>")
+        + _pg_message("Re: Planner crash", "r%40x", "<p>re</p>")
+        + _pg_message("Re: Planner crash", "third@x", "<p>third</p>")
     )
-    assert src.parse("ref", "<html></html>") == "no message on page"
+    got = src.parse("https://www.postgresql.org/message-id/flat/r%2540x", thread)
+    assert (got[1], got[2]["report_pick"], got[2]["report_thread_position"]) == (
+        "re",
+        "linked_message",
+        1,
+    )
+    assert src.parse("https://postgr.es/m/root@x", thread)[2]["report_thread_position"] == 0
+    assert src.parse("https://postgr.es/m/zzz@x", thread) == "linked message not in thread"
+    assert src.parse("https://postgr.es/m/x@y", "<html></html>") == "no message on page"
 
 
 def _mail(raw: str | bytes) -> str:
@@ -133,14 +161,32 @@ def test_lore_parse_strips_quotes_and_rejects_patches(cache: Path):
     assert src.parse("https://lore.kernel.org/r/a@b", raw) == (
         "[bug report] foo: null deref in bar()",
         "Hi,\n\nOn Mon, X wrote:\n\nfoo crashes.\n\nMore.",
-        {"report_url": "https://lore.kernel.org/r/a@b"},
+        {"report_url": "https://lore.kernel.org/r/a@b", "report_kind": "fresh"},
     )
     for subject in ("[PATCH v2 1/3] mm: fix", "[RFC PATCH] x", "[PATCH net-next] y"):
         assert src.parse("u", _mail(f"Subject: {subject}\n\nbody\n")) == "target is a patch"
     reply = _mail("Subject: Re: [PATCH v2] x\n\nthis breaks boot\n")
     assert src.parse("u", reply)[0] == "Re: [PATCH v2] x"
     only_quotes = _mail("Subject: [syzbot] KASAN: x\n\n> only quotes\n")
-    assert src.parse("u", only_quotes) == ("[syzbot] KASAN: x", "", {"report_url": "u"})
+    assert src.parse("u", only_quotes)[:2] == ("[syzbot] KASAN: x", "")
+
+
+def test_lore_report_kind(cache: Path):
+    src = reports.Lore(cache)
+
+    def kind(ref: str, raw: str) -> str:
+        return src.parse(ref, _mail(raw))[2]["report_kind"]
+
+    robot_from = "From: kernel test robot <lkp@intel.com>\nSubject: [x] warning\n\nb\n"
+    assert kind("u", robot_from) == "robot"
+    lkp_list = "https://lore.kernel.org/oe-kbuild-all/2024@intel.com/"
+    assert kind(lkp_list, "From: X <x@y>\nSubject: s\n\nb\n") == "robot"
+    robot_body = "From: Bot <bot@x>\nSubject: Re: [PATCH] x\n\nHi,\n\nkernel test robot noticed\n"
+    assert kind("u", robot_body) == "robot"
+    assert kind("u", "From: H <h@x>\nSubject: Re: [PATCH v3 2/2] mm: x\n\nthis breaks\n") == "reply"
+    assert kind("u", "From: H <h@x>\nSubject: Re:[PATCH] x\n\nb\n") == "reply"
+    assert kind("u", "From: H <h@x>\nSubject: [BUG] oops in foo\n\nb\n") == "fresh"
+    assert kind("u", "From: H <h@x>\nSubject: Re: oops in foo\n\nb\n") == "fresh"
 
 
 def test_lore_parse_resolves_charsets_and_transfer_encodings(cache: Path):
@@ -224,6 +270,7 @@ def test_cache_and_add_reports(cache: Path):
     extract.add_reports([hit, miss, none], [src], drops)
     assert (hit.problem_statement, hit.problem_source) == ("T\n\nR", "syzbot")
     assert hit.metadata["report_url"] == "https://syzkaller.appspot.com/bug?extid=bb"
+    assert hit.metadata["report_kind"] is None
     assert miss.problem_statement is None and miss.problem_source is None
     assert none.problem_statement is None
     assert drops == {"syzbot: not found": 2}

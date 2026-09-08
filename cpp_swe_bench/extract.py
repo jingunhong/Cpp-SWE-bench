@@ -108,7 +108,7 @@ def add_reports(instances: list[Instance], sources: list[Source], drops: Counter
             name, (title, body, extra) = found
             inst.problem_statement = f"{title.strip()}\n\n{body.strip()}".strip()
             inst.problem_source = name
-            inst.metadata.update(extra)
+            inst.metadata.update({"report_kind": None, **extra})  # kinds exist for lore only
 
 
 def add_patches(repo: Path, instances: list[Instance], workers: int = 8) -> None:
