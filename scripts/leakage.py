@@ -29,23 +29,23 @@ def main() -> None:
         rows = random.Random(args.seed).sample(rows, min(args.n, len(rows)))
     texts = {"problem_statement": "leakage", "commit_message": "commit_message_leakage"}
     for field, key in texts.items():
-        hits = dict.fromkeys(leakage.FLAGS, 0)
-        n = 0
+        hits: dict[str, dict[str, int]] = {}  # per problem_source (one key for commit_message)
         for r in rows:
             if field not in r or r[field] is None:
                 continue
             f = r["metadata"].get(key) or leakage.flags(r[field], r["gold_files"], r["patch"])
-            n += 1
-            for k in hits:
-                hits[k] += bool(f[k])
+            source = r.get("problem_source", "") if field == "problem_statement" else ""
+            h = hits.setdefault(source, dict.fromkeys(leakage.FLAGS, 0) | {"n": 0})
+            h["n"] += 1
+            for k in leakage.FLAGS:
+                h[k] += bool(f[k])
             if args.n:
-                cells = " | ".join("x" if f[k] else "" for k in hits)
+                cells = " | ".join("x" if f[k] else "" for k in leakage.FLAGS)
                 print(f"| {r['instance_id']} | {cells} |")
-        if not n:
-            continue
-        print(f"\n{field}, {n} instances:")
-        for k, v in hits.items():
-            print(f"  {k}: {v} ({100 * v / n:.1f}%)")
+        for source, h in sorted(hits.items()):
+            print(f"\n{field}{f' ({source})' if source else ''}, {h['n']} instances:")
+            for k in leakage.FLAGS:
+                print(f"  {k}: {h[k]} ({100 * h[k] / h['n']:.1f}%)")
 
 
 if __name__ == "__main__":

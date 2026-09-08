@@ -28,7 +28,7 @@ Design goals:
 | `data/systemd/v0/` | `systemd/systemd` | GitHub issue title + body | commits since 2022-01-01 | 1,418 | candidates reference a systemd issue |
 | `data/clickhouse/v0/` | `ClickHouse/ClickHouse` | GitHub issue title + body | commits since 2022-01-01 | 1,022 | candidates reference a ClickHouse issue |
 | `data/linux/v2/` | `torvalds/linux` | syzbot / lore / bugzilla report (5,424) or `null` | commits since 2022-01-01 | 63,115 | v2 schema, v1 range, five shards; 91% carry no linked report |
-| `data/postgres/v2/` | `postgres/postgres` | archive message (1,318) or `null` | commits since 2022-01-01 | 1,333 | v2 schema; `BUG #` message of the `Discussion:` thread, else its first message |
+| `data/postgres/v2/` | `postgres/postgres` | archive message (1,318) or `null` | commits since 2022-01-01 | 1,333 | v2 schema; `BUG #` message of the `Discussion:` thread, else the first reply to a `pgsql:` commit notification, else the linked message |
 | `data/qemu/v2/` | `qemu/qemu` | GitLab issue (677) or `null` | commits since 2022-01-01 | 2,821 | v2 schema; GitLab issue URLs are a candidate signal too |
 | `data/llvm/v2/` | `llvm/llvm-project` | GitHub issue (8,357) or `null` | commits since 2024-01-01 | 8,504 | v2 schema, v1 range and cache, two shards |
 | `data/systemd/v2/` | `systemd/systemd` | GitHub issue (1,418) or `null` | commits since 2022-01-01 | 1,424 | v2 schema, v0 range and cache |
@@ -64,7 +64,7 @@ Fields beyond `metadata` are frozen per dataset version; additions go into `meta
 - `extractor_version`, `filters` (the funnel stages applied), `changed_files_total` (all files the fix touched, including non-gold ones);
 - `references`: what made the commit a candidate (`Fixes:` SHA prefixes, GitLab issue URLs, issue numbers, or PostgreSQL bug numbers / `Discussion:` URLs as written);
 - `report_refs` (v2): the report links found in the commit message, grouped by kind and stored even when fetching fails, so yield can be measured offline. Keys are the source names above plus fetcher-less kinds `link` (`Link:` URLs), `launchpad` (QEMU Launchpad bug URLs) and `pgsql_bug` (`#N` from `Bug: #N`);
-- `report_url` (v2) for instances with a report, plus `issue_number` and `issue_url` for `github_issue`;
+- `report_url` (v2) for instances with a report, plus `issue_number` and `issue_url` for `github_issue`; `report_kind` (v2.1: `robot` / `reply` / `fresh` for `lore_report`, `null` for every other source); `report_pick`, `report_thread_root_subject` and `report_thread_position` (v2.1, `pgsql_archive`: which rule chose the message, the thread root's subject, and the chosen message's 0-based index in the flat thread);
 - `leakage`: `{path, basename, function}` computed against `problem_statement` (whether it names a gold path, a gold basename, or a function from the patch's hunk headers verbatim); `null` when `problem_statement` is `null` (v1+);
 - `commit_message_leakage` (v2): the same three flags computed against `commit_message`. The two are never mixed; `STATS.md` reports each over its own denominator.
 
@@ -87,13 +87,36 @@ Reports are fetched after the git filters, in the order listed; the first ref th
 | Repository | `problem_source` | Ref in the commit message | Fetched from |
 |---|---|---|---|
 | Linux | `syzbot` | `syzbot+<hash>@syzkaller.appspotmail.com`, `syzkaller.appspot.com/bug?extid=…` | `bug?extid=<hash>&json=1`: bug title + first crash report text |
-| Linux | `lore_report` | `Closes: https://lore.kernel.org/…` (or lkml.kernel.org) | `lore.kernel.org/all/<msgid>/raw`: subject + body, quotes and signature stripped; `[PATCH …]` targets are dropped |
+| Linux | `lore_report` | `Closes: https://lore.kernel.org/…` (or lkml.kernel.org) | `lore.kernel.org/all/<msgid>/raw` (raw bytes, charset resolved by the email library): subject + body, quotes and `-- ` signature stripped; `[PATCH …]` targets are dropped; `metadata.report_kind` is `robot`, `reply` or `fresh` |
 | Linux | `kernel_bugzilla` | `bugzilla.kernel.org/show_bug.cgi?id=N` | REST `/rest/bug/N` summary + first comment |
 | QEMU | `gitlab_issue` | `gitlab.com/qemu-project/qemu/-/issues/N` (any trailer) | GitLab API v4, no auth: title + description |
-| PostgreSQL | `pgsql_archive` | `Discussion:` URL (`postgr.es/m/<msgid>`, `postgresql.org/message-id/…`) | `/message-id/flat/<msgid>`: the thread's `BUG #` message, else its first message; subject + body, quotes and signature stripped |
+| PostgreSQL | `pgsql_archive` | `Discussion:` URL (`postgr.es/m/<msgid>`, `postgresql.org/message-id/…`) | `/message-id/flat/<msgid>`: the thread's first `BUG #` message, else the first reply to a `pgsql:` commit-notification root, else the linked message itself (`metadata.report_pick`); subject + body, quotes and signature stripped |
 | LLVM, systemd, ClickHouse | `github_issue` | `Fixes/Closes/Resolves #N`, issue URL, `owner/repo#N` | GitHub REST: title + body (pull requests and deleted issues are drops) |
 
 `Link:` is never a report source (it is usually the patch's own submission link); it is recorded in `metadata.report_refs.link` only, as are QEMU Launchpad URLs (`launchpad`) and PostgreSQL bug numbers (`pgsql_bug`).
+
+## Leakage by source
+
+Share of texts that name a gold file path, a gold basename, or a function from the patch's hunk headers verbatim (`metadata.leakage` over `problem_statement`, `metadata.commit_message_leakage` over `commit_message`; v2 data, `uv run python scripts/leakage.py data/<repo>/v2/instances*.jsonl`).
+
+| Text | Source | Repository | path | basename | function | n |
+|---|---|---|---:|---:|---:|---:|
+| `problem_statement` | `syzbot` | linux | 83.5% | 84.1% | 57.2% | 1,809 |
+| `problem_statement` | `lore_report` | linux | 46.0% | 48.1% | 42.8% | 3,087 |
+| `problem_statement` | `kernel_bugzilla` | linux | 12.1% | 14.0% | 17.4% | 528 |
+| `problem_statement` | `gitlab_issue` | qemu | 40.0% | 43.9% | 26.4% | 677 |
+| `problem_statement` | `pgsql_archive` | postgres | 13.7% | 32.8% | 36.4% | 1,318 |
+| `problem_statement` | `github_issue` | llvm | 14.8% | 23.2% | 19.0% | 8,357 |
+| `problem_statement` | `github_issue` | systemd | 19.9% | 22.1% | 15.9% | 1,418 |
+| `problem_statement` | `github_issue` | clickhouse | 39.0% | 42.2% | 27.6% | 1,022 |
+| `commit_message` | | linux | 6.4% | 8.6% | 39.4% | 63,115 |
+| `commit_message` | | qemu | 8.7% | 11.0% | 30.7% | 2,821 |
+| `commit_message` | | postgres | 0.2% | 8.8% | 36.2% | 1,333 |
+| `commit_message` | | llvm | 1.2% | 3.6% | 18.2% | 8,504 |
+| `commit_message` | | systemd | 1.0% | 1.7% | 12.6% | 1,424 |
+| `commit_message` | | clickhouse | 2.2% | 6.0% | 42.0% | 1,049 |
+
+Reports leak paths (crash dumps, logs) while commit messages leak function names, and the two fields expose the two profiles separately.
 
 ## Repository layout
 
@@ -137,7 +160,7 @@ GITHUB_TOKEN=... uv run python scripts/extract.py --repo llvm --since 2024-01-01
 GITHUB_TOKEN=... uv run python scripts/extract.py --repo systemd --since 2022-01-01 --out data/systemd/v2/
 GITHUB_TOKEN=... uv run python scripts/extract.py --repo clickhouse --since 2022-01-01 --out data/clickhouse/v2/
 uv run python scripts/validate.py data/linux/v2/instances*.jsonl
-uv run python scripts/leakage.py data/linux/v2/instances*.jsonl          # whole set, both texts
+uv run python scripts/leakage.py data/linux/v2/instances*.jsonl          # whole set, both texts, per source
 uv run python scripts/leakage.py data/linux/v2/instances-000.jsonl --n 20    # sampled table
 ```
 
