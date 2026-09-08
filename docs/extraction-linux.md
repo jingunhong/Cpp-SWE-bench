@@ -126,3 +126,30 @@ U+FFFD in lore reports 20 instances, of which one mail (a `charset="utf-8"` base
 that is not valid UTF-8) accounts for 3,733 characters and the other 19 carry 1–14 each.
 The leakage rates above moved with the longer bodies (path 54.6% → 55.2%, basename
 56.2% → 56.8%, function 44.3% → 45.1%).
+
+### v2.1: lore report kinds, short reports, syzbot crash choice
+
+`metadata.report_kind` classifies lore reports from the cached mail only (sender, list in
+the URL, subject, cleaned body; no fetching), rules in order: `robot` when the sender is
+`lkp@intel.com`, the list is `oe-kbuild-all` or `oe-lkp`, or "kernel test robot" appears
+in From or body; else `reply` when the subject matches `^Re:\s*\[` (a reply to a posted
+patch); else `fresh`. syzbot and bugzilla instances carry `report_kind: null`.
+
+| `report_kind` (lore_report, 3,087) | Instances |
+|---|---:|
+| `robot` | 1,034 |
+| `reply` | 909 |
+| `fresh` | 1,144 |
+
+Reports shorter than 300 characters after cleaning (title + body; informational, not a
+filter): lore 117, syzbot 13, bugzilla 14.
+
+Per-source leakage of `problem_statement` (`uv run python scripts/leakage.py
+data/linux/v2/instances*.jsonl`): syzbot path 83.5%, basename 84.1%, function 57.2%
+(1,809); lore 46.0% / 48.1% / 42.8% (3,087); bugzilla 12.1% / 14.0% / 17.4% (528).
+
+Syzbot crash choice: the bug JSON's `crashes[]` entries carry no time field (checked over
+all 48,857 crash entries of the 1,910 cached bugs: title, kernel config, kernel and
+syzkaller commits, crash-report and reproducer links only), so the report stays
+`crashes[0]`, the dashboard's newest crash, which may postdate the fix. Nothing was
+re-fetched and no `report_crash_time` is recorded.

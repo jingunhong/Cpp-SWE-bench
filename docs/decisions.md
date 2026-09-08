@@ -252,3 +252,14 @@ Survey (git-side funnel only, instances = 1–5 gold files; issue repos since 20
 - **Fix 2 and Fix 3 code share one commit.** Fix 3's `report_kind: null` for non-lore
   sources touches every regenerated dataset, so committing it before the PostgreSQL run
   avoided a second PostgreSQL regeneration; the data commits stay separate.
+- **`report_kind` is lore-only, rules ordered robot → reply → fresh.** A kernel test robot
+  mail whose subject is `Re: [PATCH …]` is `robot`, not `reply`. "kernel test robot" is
+  matched case-insensitively in From and the cleaned body, so a human reply naming the
+  robot in its own (unquoted) text is `robot` too; the body match is what the task asked
+  for, and quoted lines are already gone. syzbot and bugzilla get `null`; no kinds invented.
+- **"Shorter than 300 characters" is measured on the final problem statement** (title +
+  cleaned body), the text a consumer sees, not on the body alone.
+- **Syzbot crash choice unchanged: the bug JSON has no per-crash time field** (all 48,857
+  crash entries of the 1,910 cached bugs carry title, kernel config, kernel and syzkaller
+  commits, crash-report and reproducer links only). `crashes[0]` stays, nothing was
+  re-fetched, `report_crash_time` is not recorded.
