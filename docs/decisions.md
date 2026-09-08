@@ -220,3 +220,23 @@ Survey (git-side funnel only, instances = 1–5 gold files; issue repos since 20
 - **Not done.** Launchpad fetcher (6 refs), PR-merge walking, `gold_functions`, masking,
   splits: out of scope as specified. `Bug: #N` without a `Discussion:` URL stays
   unresolved (4 PostgreSQL instances).
+
+## 2026-09-08 — v2.1: report fixes
+
+- **Lore cache holds raw bytes as base64 inside the JSON cache file**, not a sibling
+  `.eml`: the base `Source.get` (one `.json` per ref, `null` for 404) stays the only cache
+  format. The 0.2.0 cache of decoded strings cannot be reused; it was moved aside to
+  `repos/cache/lore_report.v0.2.0-decoded-text` and the 3,853 lore refs were re-fetched at
+  the existing 0.5 s pace. syzbot and bugzilla caches untouched.
+- **Lore bodies are decoded strictly** (`get_content(errors="strict")`) before the
+  UTF-8-with-replacement fallback. With the library default (`errors="replace"`) a
+  `UnicodeDecodeError` can never reach the fallback, and an undeclared-charset mail with
+  8-bit UTF-8 text would come out as U+FFFD instead of the right characters. The fallback
+  is counted as `lore_report: charset fallback` (24 on the Linux v2 run), not as a drop.
+- **Signature marker is `-- ` exactly** (dash dash space); a bare `--` no longer ends the
+  body. The PostgreSQL archive keeps the trailing space (21,631 `-- <br` occurrences in the
+  cached pages), so the rule holds there too.
+- **Code is committed before the data it produced**, so `COMMAND.txt` names the extractor
+  SHA that actually ran (the v2 runs recorded the previous commit). Each fix is therefore
+  two commits: code + tests, then data + docs.
+- **v2 is overwritten in place** (never released; no v3); v0 and v1 untouched.

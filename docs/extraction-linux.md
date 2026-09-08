@@ -89,13 +89,13 @@ That is the honest picture: over 90% of `Fixes:` commits link no report at all, 
 patch's own submission (`Link:`). The kernel's `Closes:` convention dates from 2023, so the
 report rate rises over the range.
 
-Leakage: `problem_statement` (5,424 instances) path 54.6%, basename 56.2%, patched function
-44.3%; `commit_message` (63,115) path 6.4%, basename 8.6%, function 39.4%. Crash dumps and
+Leakage: `problem_statement` (5,424 instances) path 55.2%, basename 56.8%, patched function
+45.1%; `commit_message` (63,115) path 6.4%, basename 8.6%, function 39.4%. Crash dumps and
 build logs name files and functions almost by definition (`WARNING: mm/vma.h:277 at
 vma_set_pgoff`), so report-backed Linux instances leak far more than commit messages at the
 file level; nothing is masked, the flags are there to stratify on.
 
-Report length: syzbot median 4,036 characters (longest 145k), lore 2,408 (longest 545k, a
+Report length: syzbot median 4,036 characters (longest 145k), lore 2,569 (longest 545k, a
 kernel test robot mail with its config attached inline), bugzilla 1,541. Lore reports
 include kernel test robot build/sparse warnings (`oe-kbuild-all`), reviewer replies to
 patches (`Re: [PATCH …]`, including automated review bots) and human reports.
@@ -105,3 +105,24 @@ throttles an IP at ~20 requests/minute, so `Syzbot.pace = 3 s` and the ~1,900 bu
 requests each) take about 3.5 hours; lore and bugzilla run at 0.5 s pace in parallel
 threads. The blob-less clone rules above still apply; the v2 patch phase reused the blobs
 fetched for v1.
+
+### v2.1 (extractor 0.2.1): lore text fixes
+
+The first v2 run decoded lore mail as UTF-8 before parsing it, which mangled non-UTF-8
+charsets and transfer-encoded bodies: 285 of the 3,087 lore reports carried U+FFFD
+mojibake (138) or literal `\uXXXX` escape sequences (147). The fetcher now caches the raw
+message bytes (base64 in the JSON cache) and parses them with
+`email.message_from_bytes`, so the email library resolves charset and transfer encoding;
+a part whose declared charset is unknown or does not decode falls back to UTF-8 with
+replacement and is counted under `report counters` as `lore_report: charset fallback`
+(24 on this run, not drops). The same run fixed the signature cut in `clean_body`: only
+a `-- ` line (dash dash space) ends the body; a bare `--` inside a log or diff used to
+truncate it.
+
+Effect on the data (lore refs re-fetched, syzbot and bugzilla caches untouched): 494
+lore problem statements changed, 241 of them longer (signature rule), the yield is
+unchanged (5,424 / 3,087). Acceptance: literal `\uXXXX` in any problem statement 0;
+U+FFFD in lore reports 20 instances, of which one mail (a `charset="utf-8"` base64 body
+that is not valid UTF-8) accounts for 3,733 characters and the other 19 carry 1–14 each.
+The leakage rates above moved with the longer bodies (path 54.6% → 55.2%, basename
+56.2% → 56.8%, function 44.3% → 45.1%).
