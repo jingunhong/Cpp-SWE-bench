@@ -30,7 +30,7 @@ class Instance:
     problem_statement: str | None
     problem_source: str | None
     commit_message: str
-    gold_files: list[str]
+    file_changes: list[dict]  # [{"file": "<repo-relative path>"}, ...], Multi-SWE-bench shape
     gold_functions: list[str] | None
     patch: str
     metadata: dict = field(default_factory=dict)
@@ -41,6 +41,10 @@ class Instance:
     @classmethod
     def from_json(cls, line: str) -> Instance:
         return cls(**json.loads(line))
+
+    @property
+    def paths(self) -> list[str]:
+        return [f["file"] for f in self.file_changes]
 
     def validate(self) -> list[str]:
         """Return a list of problems; empty means the instance is valid."""
@@ -63,10 +67,13 @@ class Instance:
             datetime.fromisoformat(self.created_at)
         except TypeError, ValueError:
             errors.append("created_at: not ISO-8601")
-        if not isinstance(self.gold_files, list) or not self.gold_files:
-            errors.append("gold_files: must be a non-empty list")
-        elif not all(isinstance(p, str) and p for p in self.gold_files):
-            errors.append("gold_files: entries must be non-empty strings")
+        if not isinstance(self.file_changes, list) or not self.file_changes:
+            errors.append("file_changes: must be a non-empty list")
+        elif not all(
+            isinstance(f, dict) and isinstance(f.get("file"), str) and f["file"]
+            for f in self.file_changes
+        ):
+            errors.append('file_changes: entries must be {"file": <non-empty path>}')
         if self.gold_functions is not None and not isinstance(self.gold_functions, list):
             errors.append("gold_functions: must be a list or null")
         if not isinstance(self.metadata, dict):

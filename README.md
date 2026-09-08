@@ -34,7 +34,7 @@ Design goals:
 | `data/systemd/v2/` | `systemd/systemd` | GitHub issue (1,418) or `null` | commits since 2022-01-01 | 1,424 | v2 schema, v0 range and cache |
 | `data/clickhouse/v2/` | `ClickHouse/ClickHouse` | GitHub issue (1,022) or `null` | commits since 2022-01-01 | 1,049 | v2 schema, v0 range and cache |
 
-v2 directories (schema below) hold the original report in `problem_statement` and the commit message in `commit_message`; the count in parentheses is the number of instances with a report, the rest carry `null`. Each directory holds `instances.jsonl` (or `instances-000.jsonl`, `instances-001.jsonl`, … when one file would exceed 45 MB; read them with a glob), `STATS.md` (the filter funnel with counts) and `COMMAND.txt` (exact command line, extractor commit, upstream HEAD). Per-repository notes and a leakage probe live in `docs/extraction-<repo>.md`; every judgment call is logged in `docs/decisions.md`.
+v2 directories (schema below) hold the original report in `problem_statement` and the commit message in `commit_message`; the count in parentheses is the number of instances with a report, the rest carry `null`. Each directory holds `instances.jsonl` (or `instances-000.jsonl`, `instances-001.jsonl`, … when one file would exceed 45 MB; read them with a glob), `STATS.md` (the filter funnel with counts) and `COMMAND.txt` (exact command line, extractor commit, upstream HEAD). v2 directories also hold `dataset.jsonl`, the runner view: the instances that have a `problem_statement`, with every field except `patch` (join on `instance_id` for it). Its rows carry the Multi-SWE-bench C/C++ localization fields (`instance_id`, `repo`, `base_commit`, `problem_statement`, `file_changes` as `[{"file": path}, …]`) plus this repository's extras, so a runner built for that schema reads it as is. Per-repository notes and a leakage probe live in `docs/extraction-<repo>.md`; every judgment call is logged in `docs/decisions.md`.
 
 ## Instance schema
 
@@ -50,9 +50,9 @@ One JSON object per line (`data/<repo>/<version>/instances.jsonl`).
 | `problem_statement` | str \| null | The original bug report (title + body) when the repository's history links to one; `null` otherwise (v2) |
 | `problem_source` | str \| null | Where the report came from: `github_issue`, `gitlab_issue`, `syzbot`, `lore_report`, `kernel_bugzilla`, `pgsql_archive`; `null` exactly when `problem_statement` is `null` (v2) |
 | `commit_message` | str | The fix's commit message with trailers stripped; always present (v2) |
-| `gold_files` | list[str] | Repo-relative paths of non-test C/C++ source files changed by the fix |
+| `file_changes` | list[{`file`: str}] | The gold files: repo-relative paths of non-test C/C++ source files changed by the fix, in the Multi-SWE-bench C/C++ shape (`gold_files`, a plain list of the same paths, in v0/v1) |
 | `gold_functions` | list[str] \| null | `path::function` labels; `null` when not extracted |
-| `patch` | str | Unified diff of the fix restricted to `gold_files` |
+| `patch` | str | Unified diff of the fix restricted to `file_changes` |
 | `metadata` | object | Extractor version, referenced issue/bug IDs, filter decisions |
 
 Fields beyond `metadata` are frozen per dataset version; additions go into `metadata` until the next version.
@@ -123,7 +123,7 @@ Reports leak paths (crash dumps, logs) while commit messages leak function names
 ```
 cpp_swe_bench/      extraction library: gitutil, filters, schema, writers, extract, reports
 scripts/            extract.py, validate.py, leakage.py
-data/<repo>/<ver>/  instances.jsonl + STATS.md + COMMAND.txt
+data/<repo>/<ver>/  instances.jsonl (+ dataset.jsonl in v2) + STATS.md + COMMAND.txt
 tests/              unit tests on synthetic git repos created in tmp_path; no network
 docs/               decisions.md and per-repository extraction notes
 repos/              local upstream clones and the report caches (git-ignored)

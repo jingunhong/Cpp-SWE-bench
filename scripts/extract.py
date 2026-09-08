@@ -112,6 +112,7 @@ def main() -> None:
 
     args.out.mkdir(parents=True, exist_ok=True)
     paths = writers.write_jsonl(args.out, instances)
+    dataset = writers.write_dataset(args.out, instances)
     n = len(instances)
     with_report = sum(1 for i in instances if i.problem_statement is not None)
     ref_counts = Counter(k for i in instances for k in i.metadata["report_refs"])
@@ -125,6 +126,7 @@ def main() -> None:
             "instances written": n,
             "files": ", ".join(p.name for p in paths),
             "with a report / without": f"{with_report} / {n - with_report}",
+            "dataset.jsonl rows (with a report, without patch)": with_report,
             "instances with at least one report ref, per kind": dict(ref_counts),
             "reports by source": by_source,
             "report drops": dict(drops) if not args.no_reports else "skipped (--no-reports)",
@@ -161,6 +163,7 @@ def main() -> None:
         f"upstream HEAD: {upstream_head}\n"
     )
     print(f"wrote {n} instances to {', '.join(map(str, paths))}", file=sys.stderr)
+    print(f"wrote {with_report} runnable rows to {dataset}", file=sys.stderr)
 
 
 if __name__ == "__main__":

@@ -33,7 +33,8 @@ def main() -> None:
         for r in rows:
             if field not in r or r[field] is None:
                 continue
-            f = r["metadata"].get(key) or leakage.flags(r[field], r["gold_files"], r["patch"])
+            paths = r.get("gold_files") or [f["file"] for f in r["file_changes"]]  # v0/v1 | v2
+            f = r["metadata"].get(key) or leakage.flags(r[field], paths, r["patch"])
             source = r.get("problem_source", "") if field == "problem_statement" else ""
             h = hits.setdefault(source, dict.fromkeys(leakage.FLAGS, 0) | {"n": 0})
             h["n"] += 1

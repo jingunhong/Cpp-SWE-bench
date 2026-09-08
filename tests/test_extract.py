@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 from cpp_swe_bench import extract, filters, gitutil, reports, writers
@@ -34,7 +35,8 @@ def test_end_to_end(synthetic_repo, tmp_path: Path):
     assert inst.commit_message == "foo: fix off-by-one\n\nfoo() returned the wrong value."
     assert inst.problem_statement is None and inst.problem_source is None
     assert inst.metadata["report_refs"] == {"link": ["https://example.com"]}
-    assert inst.gold_files == ["drivers/foo.c", "drivers/foo.h"]
+    assert inst.file_changes == [{"file": "drivers/foo.c"}, {"file": "drivers/foo.h"}]
+    assert inst.paths == ["drivers/foo.c", "drivers/foo.h"]
     assert inst.gold_functions is None
     assert inst.metadata["references"] == [shas["initial"][:12]]
 
@@ -50,6 +52,17 @@ def test_end_to_end(synthetic_repo, tmp_path: Path):
     }
     [out] = writers.write_jsonl(tmp_path, instances)
     assert Instance.from_json(out.read_text().splitlines()[0]) == inst
+    assert writers.write_dataset(tmp_path, instances).read_text() == ""  # no report: not runnable
+    inst.problem_statement, inst.problem_source = "foo() crashes", "github_issue"
+    [row] = map(json.loads, writers.write_dataset(tmp_path, instances).read_text().splitlines())
+    assert "patch" not in row and row["metadata"] == inst.metadata
+    assert {k: row[k] for k in ("instance_id", "repo", "base_commit", "problem_statement")} == {
+        "instance_id": inst.instance_id,
+        "repo": "example/toy",
+        "base_commit": shas["initial"],
+        "problem_statement": "foo() crashes",
+    }
+    assert row["file_changes"] == [{"file": "drivers/foo.c"}, {"file": "drivers/foo.h"}]
     stats = tmp_path / "STATS.md"
     writers.write_stats(stats, "t", list(funnel.items()), {"n": 1})
     assert "| 1-5 gold files | 1 | 20.0% | 1 |" in stats.read_text()

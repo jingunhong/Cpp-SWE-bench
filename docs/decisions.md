@@ -263,3 +263,18 @@ Survey (git-side funnel only, instances = 1–5 gold files; issue repos since 20
   crash entries of the 1,910 cached bugs carry title, kernel config, kernel and syzkaller
   commits, crash-report and reproducer links only). `crashes[0]` stays, nothing was
   re-fetched, `report_crash_time` is not recorded.
+
+## 2026-09-08 — runner format (extractor 0.3.0)
+
+- **`gold_files` renamed to `file_changes`** with the Multi-SWE-bench C/C++ shape
+  `[{"file": path}, …]`: same paths, same meaning, one name. v2 only (never released); v0
+  and v1 keep `gold_files` and are not touched. The v2 schema already could not read
+  v0/v1 files (`commit_message` is required), so no compatibility alias was added;
+  `scripts/leakage.py` reads either key.
+- **`dataset.jsonl` per v2 directory** is the runner view: only instances with a
+  `problem_statement` (a localizer has nothing to run on otherwise; the `null` rows stay
+  in `instances*.jsonl`, where yield is measured), every field except `patch`. `patch`
+  is dropped because Linux (48.9 MB) and LLVM (68.5 MB) would exceed the 45 MB file
+  limit with it and the runner does not read it; without it both are under 41 MB.
+- **All six v2 datasets are regenerated** (offline, warm caches) rather than rewritten by
+  a conversion script, so `COMMAND.txt` and `STATS.md` describe the files that exist.

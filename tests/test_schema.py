@@ -17,7 +17,7 @@ def make(**overrides) -> Instance:
         problem_statement="broken",
         problem_source="github_issue",
         commit_message="fix: broken",
-        gold_files=["a.c"],
+        file_changes=[{"file": "a.c"}],
         gold_functions=None,
         patch="diff",
         metadata={},
@@ -34,7 +34,7 @@ def test_roundtrip():
 def test_field_order_matches_readme():
     assert [f.name for f in dataclasses.fields(Instance)] == [
         "instance_id", "repo", "base_commit", "fix_commit", "created_at",
-        "problem_statement", "problem_source", "commit_message", "gold_files", "gold_functions",
+        "problem_statement", "problem_source", "commit_message", "file_changes", "gold_functions",
         "patch", "metadata",
     ]  # fmt: skip
 
@@ -45,7 +45,9 @@ def test_field_order_matches_readme():
         ({"base_commit": SHA[:12]}, "base_commit"),
         ({"fix_commit": SHA.upper()}, "fix_commit"),
         ({"created_at": "yesterday"}, "created_at"),
-        ({"gold_files": []}, "gold_files"),
+        ({"file_changes": []}, "file_changes"),
+        ({"file_changes": ["a.c"]}, "file_changes"),
+        ({"file_changes": [{"file": ""}]}, "file_changes"),
         ({"problem_statement": ""}, "problem_statement"),
         ({"problem_statement": None}, "problem_source"),
         ({"problem_source": "commit_message"}, "problem_source"),

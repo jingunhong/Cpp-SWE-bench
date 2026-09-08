@@ -4,7 +4,7 @@ Upstream: `torvalds/linux`, blob-less clone at `repos/linux`. Candidates are non
 non-revert commits whose message carries a `Fixes: <sha> ("...")` trailer. The problem
 statement is the commit subject and body with trailers stripped (`problem_source =
 "commit_message"`); `base_commit` is the first parent; `created_at` is the author date;
-`gold_files` are the changed non-test C/C++ sources; `gold_functions` is `null`.
+`file_changes` are the changed non-test C/C++ sources; `gold_functions` is `null`.
 
 ## Range
 

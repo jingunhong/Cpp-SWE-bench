@@ -1,5 +1,7 @@
-"""Output writers: ``instances*.jsonl`` and ``STATS.md``."""
+"""Output writers: ``instances*.jsonl``, ``dataset.jsonl`` and ``STATS.md``."""
 
+import json
+from dataclasses import asdict
 from pathlib import Path
 
 from .schema import Instance
@@ -30,6 +32,21 @@ def write_jsonl(out_dir: Path, instances: list[Instance], max_bytes: int = MAX_S
         path.write_bytes(b"".join(lines))
         paths.append(path)
     return paths
+
+
+def write_dataset(out_dir: Path, instances: list[Instance]) -> Path:
+    """``dataset.jsonl``: the rows a localizer can run on (``problem_statement`` not null),
+    every field but ``patch`` (kept in ``instances*.jsonl``; join on ``instance_id``). The
+    Multi-SWE-bench C/C++ fields are ``instance_id``, ``repo``, ``base_commit``,
+    ``problem_statement`` and ``file_changes``; everything else is an extra."""
+    path = out_dir / "dataset.jsonl"
+    with path.open("w", encoding="utf-8") as f:
+        for inst in instances:
+            if inst.problem_statement is not None:
+                row = asdict(inst)
+                del row["patch"]
+                f.write(json.dumps(row, ensure_ascii=False) + "\n")
+    return path
 
 
 def write_stats(path: Path, title: str, funnel: list[tuple[str, int]], notes: dict) -> None:

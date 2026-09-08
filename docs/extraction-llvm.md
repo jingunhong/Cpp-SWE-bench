@@ -6,7 +6,7 @@ non-revert commits whose message references an issue of `llvm/llvm-project` with
 repositories such as `clangd/clangd` are ignored). The problem statement is the issue title
 plus body from the GitHub REST API (`problem_source = "github_issue"`); everything else
 follows the Linux pipeline: `base_commit` is the first parent, `created_at` the author
-date, `gold_files` the changed non-test C/C++ sources, `gold_functions` `null`.
+date, `file_changes` the changed non-test C/C++ sources, `gold_functions` `null`.
 
 ## Range
 

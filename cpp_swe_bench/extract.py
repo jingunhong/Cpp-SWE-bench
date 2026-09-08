@@ -59,7 +59,7 @@ def mine(
             problem_statement=None,
             problem_source=None,
             commit_message=filters.strip_trailers(c.message),
-            gold_files=gold,
+            file_changes=[{"file": p} for p in gold],
             gold_functions=None,
             patch="",
             metadata={
@@ -118,15 +118,15 @@ def add_patches(repo: Path, instances: list[Instance], workers: int = 8) -> None
     parallel threads."""
     with ThreadPoolExecutor(workers) as pool:
         oids = pool.map(
-            lambda i: gitutil.blob_oids(repo, i.base_commit, i.fix_commit, i.gold_files), instances
+            lambda i: gitutil.blob_oids(repo, i.base_commit, i.fix_commit, i.paths), instances
         )
         gitutil.prefetch_blobs(repo, [o for batch in oids for o in batch])
         patches = pool.map(
-            lambda i: gitutil.diff(repo, i.base_commit, i.fix_commit, i.gold_files), instances
+            lambda i: gitutil.diff(repo, i.base_commit, i.fix_commit, i.paths), instances
         )
         for inst, patch in zip(instances, patches, strict=True):
             inst.patch = patch
-            inst.metadata["leakage"] = leakage.flags(inst.problem_statement, inst.gold_files, patch)
+            inst.metadata["leakage"] = leakage.flags(inst.problem_statement, inst.paths, patch)
             inst.metadata["commit_message_leakage"] = leakage.flags(
-                inst.commit_message, inst.gold_files, patch
+                inst.commit_message, inst.paths, patch
             )
